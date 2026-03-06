@@ -24,7 +24,7 @@ Optional (GPU monitoring):
     pip install nvidia-ml-py
 
 Optional (local LLM without Ollama):
-    pip install langchain-community transformers torch accelerate
+    pip install -U langchain-huggingface transformers torch accelerate
 
 Configuration: edit ENV DEFAULTS below, or set environment variables,
 or create an 'env' file alongside this script (key=value format).
@@ -64,7 +64,7 @@ os.environ.setdefault("LLM_MODEL",       "qwen2.5:7b")
 os.environ.setdefault("EMBED_MODEL",     "nomic-embed-text")
 os.environ.setdefault("NUM_THREAD",      "16")
 os.environ.setdefault("NUM_CTX",         "4096")
-os.environ.setdefault("KUBECONFIG_PATH", "~/.kube/config")
+os.environ.setdefault("KUBECONFIG_PATH", "~/kubeconfig")
 os.environ.setdefault("PHASE",           "2")
 os.environ.setdefault("LOG_LEVEL",       "INFO")
 os.environ.setdefault("CHROMA_DIR",      str(_HERE / "chromadb"))
@@ -650,9 +650,9 @@ def _build_llm():
     Build the LangChain LLM.
 
     Priority:
-      1. --model-dir / LLM_MODEL_DIR env  → load from local directory
-         a. Try HuggingFacePipeline (transformers + torch)  — works fully offline
-         b. Fallback to Ollama with the path as model name
+      1. --model-dir / LLM_MODEL_DIR env  → load from local directory (fully air-gapped)
+         Uses langchain-huggingface ChatHuggingFace which supports bind_tools / function calling.
+         Falls back to Ollama with the path as model name if langchain-huggingface not installed.
       2. No --model-dir                   → standard Ollama by model name
     """
     model_dir = os.getenv("LLM_MODEL_DIR","").strip()
@@ -660,11 +660,13 @@ def _build_llm():
     if model_dir and Path(model_dir).exists():
         _log_ag.info(f"[LLM] Local directory: {model_dir}")
 
-        # ── Option A: HuggingFace transformers (fully air-gapped) ──────────
+        # ── Option A: langchain-huggingface ChatHuggingFace ────────────────
+        # ChatHuggingFace wraps transformers pipeline and supports bind_tools.
+        # Install: pip install -U langchain-huggingface transformers torch accelerate
         try:
-            from langchain_community.llms import HuggingFacePipeline
+            from langchain_huggingface import HuggingFacePipeline, ChatHuggingFace
             import transformers, torch
-            _log_ag.info("[LLM] Loading with HuggingFacePipeline…")
+            _log_ag.info("[LLM] Loading HuggingFacePipeline from local dir…")
             pipe = transformers.pipeline(
                 "text-generation",
                 model=model_dir,
@@ -675,18 +677,20 @@ def _build_llm():
                 device_map="auto" if NUM_GPU > 0 else "cpu",
                 torch_dtype=torch.float16 if NUM_GPU > 0 else torch.float32,
             )
-            _log_ag.info("[LLM] HuggingFacePipeline ready")
-            return HuggingFacePipeline(pipeline=pipe)
+            llm = ChatHuggingFace(llm=HuggingFacePipeline(pipeline=pipe))
+            _log_ag.info("[LLM] ChatHuggingFace ready (supports tool calling)")
+            return llm
         except ImportError:
-            _log_ag.warning("[LLM] langchain-community/transformers not installed — "
-                            "falling back to Ollama with local path")
+            _log_ag.warning("[LLM] langchain-huggingface / transformers not installed — "
+                            "install with: pip install -U langchain-huggingface transformers torch accelerate\n"
+                            "       Falling back to Ollama with local path.")
         except Exception as e:
             _log_ag.warning(f"[LLM] HuggingFace load failed ({e}) — "
                             "falling back to Ollama with local path")
 
         # ── Option B: Ollama pointing at the local path ─────────────────────
         from langchain_ollama import ChatOllama
-        _log_ag.info(f"[LLM] Ollama(local): {model_dir}")
+        _log_ag.info(f"[LLM] Ollama(local path): {model_dir}")
         return ChatOllama(
             model=model_dir, base_url=OLLAMA_BASE_URL,
             temperature=0.1, num_ctx=NUM_CTX,

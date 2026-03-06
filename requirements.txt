@@ -35,4 +35,4 @@ python-dotenv>=1.0
 # pip install nvidia-ml-py
 
 # ── OPTIONAL: Load LLM from local directory without Ollama (--model-dir) ──────
-# pip install langchain-community transformers torch accelerate
+# pip install -U langchain-huggingface transformers torch accelerate
