@@ -787,6 +787,22 @@ def get_agent():
     return _agent
 
 
+def _clean_response(text: str) -> str:
+    """Strip chat-template tokens that some models (e.g. Qwen2.5) leak into output."""
+    import re
+    # Remove complete <|im_start|>role....<|im_end|> blocks
+    text = re.sub(r'<\|im_start\|>\w+\s*\n?[\s\S]*?<\|im_end\|>\n?', '', text)
+    # If a stray opening token remains, keep only the text after the last one
+    if '<|im_start|>' in text:
+        last = text.split('<|im_start|>')[-1]
+        last = re.sub(r'^\w+\s*\n', '', last, count=1)
+        text = last
+    # Strip residual end tokens and BOS/EOS markers from other model families
+    for tok in ['<|im_end|>', '<s>', '</s>', '[INST]', '[/INST]', '<<SYS>>', '<</SYS>>']:
+        text = text.replace(tok, '')
+    return text.strip()
+
+
 async def run_agent(user_message: str) -> dict:
     agent = get_agent()
     t0    = time.time()
@@ -798,17 +814,17 @@ async def run_agent(user_message: str) -> dict:
     })
     elapsed = time.time() - t0
     last    = final["messages"][-1]
+    raw     = last.content if hasattr(last, "content") else str(last)
     updates = final.get("status_updates", [])
     updates.append(f"✅ Done in {elapsed:.0f}s")
     return {
-        "response":        last.content if hasattr(last,"content") else str(last),
+        "response":        _clean_response(raw),
         "tools_used":      final.get("tool_calls_made", []),
         "iterations":      final.get("iteration", 0),
         "phase":           PHASE,
         "status_updates":  updates,
         "elapsed_seconds": round(elapsed, 1),
     }
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 5 — FASTAPI APPLICATION

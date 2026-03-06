@@ -16,6 +16,7 @@ body{font-family:'IBM Plex Sans',sans-serif}
 textarea:focus{outline:none}
 button{cursor:pointer;font-family:inherit}
 
+/* ── Theme variables (Midnight defaults) ─────────────────────────────────── */
 :root{
   --bg:#030712;--headerBg:#070d1a;--border:#0f1f35;
   --accent:#38bdf8;--accent2:#7dd3fc;
@@ -23,86 +24,101 @@ button{cursor:pointer;font-family:inherit}
   --userBg:#0f172a;--userBorder:#1e293b;
   --statusBg:#040b14;--dimText:#475569;--bodyText:#cbd5e1;
   --tooltipBg:#0a1628;--tooltipText:#94a3b8;
-  --cpuBg:#020a14;--cpuBorder:#0f1f35;--cpuLabel:#7dd3fc;
+  --panelBg:#020a14;--panelBorder:#0f1f35;--panelLabel:#7dd3fc;--panelDim:#475569;
   --textMain:#e2e8f0;--inputText:#e2e8f0;
   --shimmer:linear-gradient(90deg,#38bdf8 0%,#818cf8 25%,#c084fc 50%,#38bdf8 75%,#00C1DE 100%);
 }
 
+/* ── Animations ──────────────────────────────────────────────────────────── */
 @keyframes pls{0%,100%{opacity:1}50%{opacity:.2}}
-@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @keyframes shimmer{0%{background-position:-500px 0}100%{background-position:500px 0}}
 @keyframes dotPulse{0%,80%,100%{opacity:.2}40%{opacity:1}}
+@keyframes inferPulse{0%,100%{opacity:1}50%{opacity:.5}}
 
+/* ── Title shimmer ───────────────────────────────────────────────────────── */
 .shiny{
   background:var(--shimmer);background-size:500px 100%;
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;
   background-clip:text;animation:shimmer 4s linear infinite;
 }
-.shiny-solid{-webkit-text-fill-color:unset !important;background:none !important;
-  animation:none !important;color:var(--titleSolid,#f96702) !important}
+.shiny-solid{
+  -webkit-text-fill-color:unset !important;background:none !important;
+  animation:none !important;color:var(--solidTitle,#f96702) !important;
+}
 .fade-up{animation:fadeUp .25s ease}
 
-/* Layout */
+/* ── App layout ──────────────────────────────────────────────────────────── */
 #app{height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--textMain)}
+
+/* Header */
 #hdr{
-  padding:10px 24px;border-bottom:1px solid var(--border);
-  background:var(--headerBg);display:flex;align-items:center;gap:14px;flex-shrink:0;
+  padding:10px 20px;border-bottom:1px solid var(--border);
+  background:var(--headerBg);display:flex;align-items:center;gap:12px;flex-shrink:0;
   position:relative;z-index:100;
 }
 #logos{display:flex;align-items:center;gap:8px;flex-shrink:0}
 #logos img{object-fit:contain;display:block}
 #title-block{display:flex;flex-direction:column;gap:2px}
-#title{font-size:20px;font-weight:700;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em;line-height:1}
-#subtitle{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;display:flex;align-items:center;gap:6px}
-#hdr-right{margin-left:auto;display:flex;align-items:center;gap:16px}
+#ttl{font-size:19px;font-weight:700;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em;line-height:1}
+#subtitle{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;display:flex;align-items:center;gap:5px}
+#hdr-right{margin-left:auto;display:flex;align-items:center;gap:14px}
 #email-link{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;text-decoration:none;transition:color .2s}
 #email-link:hover{color:var(--accent2)}
-#theme-row{display:flex;align-items:center;gap:6px}
+
+/* Theme dots */
+#theme-row{display:flex;align-items:center;gap:5px}
 #theme-label{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace}
 .tdot{
-  width:18px;height:18px;border-radius:50%;border:2px solid transparent;
-  cursor:pointer;padding:0;transition:border-color .2s,transform .15s;flex-shrink:0;
+  width:17px;height:17px;border-radius:50%;border:2px solid transparent;
+  cursor:pointer;padding:0;transition:border-color .15s,transform .12s;flex-shrink:0;
 }
-.tdot:hover{transform:scale(1.2)}
-.tdot.active{border-color:var(--accent) !important}
-#theme-name{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;margin-left:2px;min-width:52px}
-#ready-row{display:flex;align-items:center;gap:7px}
-#ready-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e88;flex-shrink:0}
-#ready-text{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace}
+.tdot:hover{transform:scale(1.25)}
+.tdot.active{border-color:var(--accent)}
+#theme-name{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;min-width:56px}
 
-/* Tooltip — JS-driven, not CSS hover (avoids z-index / Cloudflare issues) */
-#tt-wrap{position:relative;display:inline-flex;align-items:center}
+/* Ready dot */
+#ready-row{display:flex;align-items:center;gap:6px}
+#rdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+#rtxt{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace}
+
+/* ── Tooltip (click-driven, fixed position) ──────────────────────────────── */
 #tt-btn{
-  width:17px;height:17px;border-radius:50%;background:var(--headerBg);
-  border:1px solid var(--border);display:flex;align-items:center;justify-content:center;
-  cursor:help;font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;
-  flex-shrink:0;user-select:none;
+  width:17px;height:17px;border-radius:50%;
+  background:var(--headerBg);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:11px;color:var(--dimText);
+  font-family:'IBM Plex Mono',monospace;flex-shrink:0;user-select:none;
 }
 #tt-box{
   position:fixed;z-index:9999;
   background:var(--tooltipBg);border:1px solid var(--border);
-  border-radius:10px;padding:14px 16px;width:280px;
+  border-radius:10px;padding:14px 16px;width:285px;
   font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;color:var(--tooltipText);
-  line-height:1.7;box-shadow:0 8px 32px #0008;pointer-events:none;
-  opacity:0;transition:opacity .15s;
+  line-height:1.7;box-shadow:0 8px 32px #0009;
+  opacity:0;pointer-events:none;transition:opacity .15s;
 }
-#tt-box.visible{opacity:1}
+#tt-box.open{opacity:1;pointer-events:auto}
+#tt-box .tt-row{margin-bottom:5px}
+#tt-box .tt-key{color:var(--panelDim);font-size:11px}
+#tt-box .tt-val{color:var(--bodyText)}
+#tt-note{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px}
 
-/* Body */
+/* ── Body (chat + panels) ────────────────────────────────────────────────── */
 #body{flex:1;display:flex;overflow:hidden}
 #chat-col{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
-#messages{flex:1;overflow:auto;padding:20px 24px}
-#examples-label{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;margin-bottom:10px;letter-spacing:.1em}
-#examples-btns{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+#messages{flex:1;overflow-y:auto;padding:18px 22px}
+#ex-label{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;letter-spacing:.1em}
+#ex-btns{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
 .ex-btn{
   background:var(--headerBg);border:1px solid var(--border);
-  border-radius:8px;padding:7px 12px;font-size:12px;
-  color:var(--dimText);font-family:'IBM Plex Mono',monospace;transition:all .2s;
+  border-radius:8px;padding:6px 12px;font-size:12px;
+  color:var(--dimText);font-family:'IBM Plex Mono',monospace;transition:all .18s;
 }
 .ex-btn:hover{border-color:var(--accent);color:var(--accent2)}
 
 /* Input bar */
-#input-bar{border-top:1px solid var(--border);padding:14px 24px;background:var(--headerBg);display:flex;gap:10px}
+#input-bar{border-top:1px solid var(--border);padding:12px 22px;background:var(--headerBg);display:flex;gap:10px}
 #chat-input{
   flex:1;background:var(--inputBg);border:1px solid var(--border);
   border-radius:10px;padding:10px 14px;color:var(--inputText);
@@ -113,323 +129,390 @@ button{cursor:pointer;font-family:inherit}
   background:var(--msgBg);border:1px solid var(--accent);border-radius:10px;
   padding:10px 18px;color:var(--accent2);font-size:13px;
   font-family:'IBM Plex Mono',monospace;font-weight:700;
-  transition:all .2s;align-self:stretch;min-width:80px;
+  transition:all .2s;align-self:stretch;min-width:82px;
 }
 #send-btn:disabled{background:var(--headerBg);border-color:var(--border);color:var(--dimText);cursor:not-allowed}
 
-/* Messages */
-.msg-user{display:flex;justify-content:flex-end;margin-bottom:16px}
+/* ── Chat messages ───────────────────────────────────────────────────────── */
+.msg-user{display:flex;justify-content:flex-end;margin-bottom:14px}
 .msg-user-bubble{
   max-width:72%;background:var(--userBg);border:1px solid var(--userBorder);
-  border-radius:14px 14px 2px 14px;padding:11px 16px;
+  border-radius:14px 14px 2px 14px;padding:10px 15px;
   font-size:14px;color:var(--bodyText);line-height:1.6;
 }
-.msg-ai{display:flex;gap:10px;align-items:flex-start;margin-bottom:20px}
-.msg-ai-icon{
-  width:28px;height:28px;border-radius:8px;background:var(--headerBg);
+.msg-ai{display:flex;gap:10px;align-items:flex-start;margin-bottom:18px}
+.ai-icon{
+  width:27px;height:27px;border-radius:7px;background:var(--headerBg);
   border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;
   flex-shrink:0;margin-top:2px;
 }
-.msg-ai-body{flex:1;min-width:0}
-.msg-ai-bubble{
+.ai-body{flex:1;min-width:0}
+.ai-bubble{
   background:var(--msgBg);border:1px solid var(--border);
-  border-radius:2px 14px 14px 14px;padding:14px 18px;
-  font-size:14px;color:var(--bodyText);line-height:1.75;white-space:pre-wrap;word-break:break-word;
+  border-radius:2px 14px 14px 14px;padding:13px 17px;
+  font-size:14px;color:var(--bodyText);line-height:1.75;
+  white-space:pre-wrap;word-break:break-word;
 }
-.msg-elapsed{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;margin-top:5px}
-.msg-tools{margin-top:6px;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
-.tool-badge{
+.ai-elapsed{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;margin-top:4px}
+.ai-tools{margin-top:5px;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.tbadge{
   display:inline-flex;align-items:center;gap:4px;padding:2px 8px;
   border-radius:999px;font-size:10px;background:var(--headerBg);
   border:1px solid var(--accent)44;color:var(--accent2);
   font-family:'IBM Plex Mono',monospace;font-weight:700;
 }
-.tools-meta{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace}
+.tmeta{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace}
+
+/* Thinking status */
 .status-box{
   background:var(--statusBg);border:1px solid var(--border);
-  border-radius:12px;padding:12px 16px;margin-bottom:4px;
+  border-radius:12px;padding:12px 15px;margin-bottom:4px;
   font-family:'IBM Plex Mono',monospace;font-size:12px;
-  display:flex;flex-direction:column;gap:6px;
+  display:flex;flex-direction:column;gap:5px;
 }
-.status-label{color:var(--dimText);font-size:10px;letter-spacing:.12em;margin-bottom:2px}
-.status-line{display:flex;align-items:center;gap:8px;color:var(--dimText)}
-.status-line.active{color:var(--accent2)}
+.s-label{color:var(--dimText);font-size:10px;letter-spacing:.12em;margin-bottom:2px}
+.s-line{display:flex;align-items:center;gap:8px;color:var(--dimText)}
+.s-line.cur{color:var(--accent2)}
 .sdots{display:flex;gap:4px;margin-top:2px}
 .sdot{width:4px;height:4px;border-radius:50%;background:var(--dimText);animation:dotPulse 1.2s infinite}
 
-/* Side panels */
+/* ── Right panels ────────────────────────────────────────────────────────── */
 #panels{display:flex;flex-shrink:0}
-.side-panel{
-  width:290px;flex-shrink:0;background:var(--cpuBg);border-left:1px solid var(--cpuBorder);
-  display:flex;flex-direction:column;font-family:'IBM Plex Mono',monospace;font-size:11px;overflow:hidden;
+.panel{
+  width:288px;flex-shrink:0;
+  background:var(--panelBg);border-left:1px solid var(--panelBorder);
+  display:flex;flex-direction:column;font-family:'IBM Plex Mono',monospace;overflow:hidden;
 }
-.phdr{
-  padding:8px 12px 6px;border-bottom:1px solid var(--cpuBorder);
+.ph{  /* panel header */
+  padding:8px 12px 6px;border-bottom:1px solid var(--panelBorder);
   display:flex;justify-content:space-between;align-items:center;flex-shrink:0;
 }
-.phdr-title{color:var(--cpuLabel);font-weight:700;font-size:13px}
-.phdr-sub{color:var(--dimText);font-size:11px}
-.pfooter{
-  padding:6px 12px 8px;border-top:1px solid var(--cpuBorder);
+.ph-title{color:var(--panelLabel);font-weight:700;font-size:12px;letter-spacing:.04em}
+.ph-sub{color:var(--panelDim);font-size:11px}
+.pf{ /* panel footer */
+  padding:7px 12px;border-top:1px solid var(--panelBorder);
   display:flex;justify-content:space-between;align-items:center;flex-shrink:0;
 }
+
+/* Inference badge (footer) */
+.infer-badge{
+  display:flex;align-items:center;gap:5px;
+  font-size:11px;font-family:'IBM Plex Mono',monospace;font-weight:700;
+}
+.infer-dot{
+  width:7px;height:7px;border-radius:50%;flex-shrink:0;
+  animation:inferPulse 2s ease-in-out infinite;
+}
+
 /* Sparkline */
-#spark-wrap{
-  background:var(--headerBg);border:1px solid var(--cpuBorder);
+.spark-wrap{
+  background:var(--headerBg);border:1px solid var(--panelBorder);
   border-radius:4px;margin-bottom:6px;overflow:hidden;position:relative;
 }
-#spark-lbl{position:absolute;top:3px;right:5px;font-size:10px;color:var(--dimText)}
-/* Core grid */
-#cores-grid{flex:1;overflow-y:auto;padding:0 12px;display:flex;gap:10px}
-.core-col{flex:1;display:flex;flex-direction:column;gap:3px}
-.core-row{display:flex;align-items:center;gap:4px}
-.core-lbl{color:var(--dimText);min-width:22px;font-size:10px}
-.core-track{flex:1;position:relative;height:8px}
-.core-bg{position:absolute;inset:0;background:var(--cpuBorder)33;border-radius:2px}
+.spark-lbl{position:absolute;top:3px;right:5px;font-size:10px;color:var(--panelDim)}
+
+/* Section inside panel */
+.psec{padding:8px 12px 4px;flex-shrink:0}
+
+/* Utilisation bar (generic) */
+.util-row{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.util-lbl{font-size:11px;color:var(--panelLabel);min-width:24px}
+.util-pct{font-size:12px;font-weight:700;min-width:38px;text-align:right}
+.ubar-wrap{flex:1;position:relative;height:8px;border-radius:2px;overflow:hidden;background:var(--panelBorder)33}
+.ubar-fill{position:absolute;top:0;left:0;bottom:0;border-radius:2px;transition:width .9s ease}
+.ubar-dots{
+  position:absolute;inset:0;
+  background-image:repeating-linear-gradient(90deg,transparent,transparent 4px,var(--panelBg)66 4px,var(--panelBg)66 5px);
+}
+
+/* Dotbar (CPU total) */
+#cpu-dotbar{display:flex;gap:1px;align-items:center;overflow:hidden;flex:1}
+
+/* Cores grid */
+#cores-grid{flex:1;overflow-y:auto;padding:0 12px;display:flex;gap:8px}
+.core-col{flex:1;display:flex;flex-direction:column;gap:2px}
+.core-row{display:flex;align-items:center;gap:3px}
+.core-lbl{color:var(--panelDim);min-width:20px;font-size:10px}
+.core-track{flex:1;position:relative;height:7px}
+.core-bg{position:absolute;inset:0;background:var(--panelBorder)33;border-radius:2px}
 .core-fill{position:absolute;top:0;left:0;bottom:0;border-radius:2px;transition:width .8s ease}
 .core-dots{
   position:absolute;inset:0;border-radius:2px;
-  background-image:repeating-linear-gradient(90deg,transparent,transparent 4px,var(--cpuBg)66 4px,var(--cpuBg)66 5px);
+  background-image:repeating-linear-gradient(90deg,transparent,transparent 4px,var(--panelBg)66 4px,var(--panelBg)66 5px);
 }
-.core-pct{min-width:30px;text-align:right;font-size:10px;color:var(--dimText)}
-/* RAM */
-.ram-section{padding:8px 12px 6px;border-top:1px solid var(--cpuBorder);flex-shrink:0}
-.ram-title{color:var(--cpuLabel);font-weight:700;font-size:13px;margin-bottom:6px}
-.ram-row{display:flex;align-items:center;gap:6px}
-.ram-lbl{color:var(--cpuLabel);font-size:13px}
-.ram-track{flex:1;height:8px;background:var(--cpuBorder)33;border-radius:2px;position:relative;overflow:hidden}
-.ram-fill{position:absolute;top:0;left:0;bottom:0;border-radius:2px;transition:width 1s ease}
-.ram-val{color:var(--dimText);font-size:10px;min-width:78px;text-align:right}
-/* GPU */
-.gpu-card{
-  background:var(--headerBg);border:1px solid var(--cpuBorder);
-  border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;
-}
-.gpu-chdr{display:flex;justify-content:space-between;align-items:center}
-.gpu-idx{color:var(--cpuLabel);font-weight:700;font-size:12px}
-.gpu-name{color:var(--dimText);font-size:10px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bar-row{display:flex;justify-content:space-between;margin-bottom:3px}
-.bar-lbl{color:var(--dimText);font-size:11px}
-.bar-val{font-weight:700;font-size:12px}
-.gpu-track{height:10px;background:var(--cpuBorder)33;border-radius:3px;position:relative;overflow:hidden}
-.gpu-fill{position:absolute;top:0;left:0;bottom:0;border-radius:3px;transition:width 1s ease}
-.gpu-stripe{
-  position:absolute;inset:0;
-  background-image:repeating-linear-gradient(90deg,transparent,transparent 4px,var(--cpuBg)55 4px,var(--cpuBg)55 5px);
-}
-.vram-track{height:8px;background:var(--cpuBorder)33;border-radius:3px;position:relative;overflow:hidden}
-.vram-fill{position:absolute;top:0;left:0;bottom:0;border-radius:3px;transition:width 1s ease}
-.gpu-meta{display:flex;gap:12px;margin-top:2px;font-size:12px}
+.core-pct{min-width:28px;text-align:right;font-size:10px;color:var(--panelDim)}
 
-/* CPU spark section */
-#cpu-spark-section{padding:8px 12px 4px;flex-shrink:0}
-#cpu-bar-row{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+/* Load avg section */
+.load-sec{padding:5px 12px 7px;border-top:1px solid var(--panelBorder);flex-shrink:0;display:flex;justify-content:space-between;align-items:center}
+.load-title{color:var(--panelLabel);font-weight:700;font-size:11px}
+#load-avg{color:var(--panelDim);font-size:11px;letter-spacing:.06em}
+
+/* GPU card */
+.gpu-cards-wrap{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:12px}
+.gpu-card{
+  background:var(--headerBg);border:1px solid var(--panelBorder);
+  border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:7px;
+}
+.gpu-chdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
+.gpu-idx{color:var(--panelLabel);font-weight:700;font-size:12px}
+.gpu-name{color:var(--panelDim);font-size:10px;max-width:165px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.g-bar-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
+.g-bar-lbl{color:var(--panelDim);font-size:11px}
+.g-bar-val{font-size:12px;font-weight:700}
+.g-track{height:9px;background:var(--panelBorder)33;border-radius:3px;position:relative;overflow:hidden}
+.g-fill{position:absolute;top:0;left:0;bottom:0;border-radius:3px;transition:width 1s ease}
+.g-stripe{
+  position:absolute;inset:0;
+  background-image:repeating-linear-gradient(90deg,transparent,transparent 4px,var(--panelBg)55 4px,var(--panelBg)55 5px);
+}
+.vram-track{height:7px;background:var(--panelBorder)33;border-radius:3px;position:relative;overflow:hidden}
+.vram-fill{position:absolute;top:0;left:0;bottom:0;border-radius:3px;transition:width 1s ease}
+.gpu-meta{display:flex;gap:10px;font-size:11px}
 </style>
 </head>
 <body>
 <div id="app">
 
+  <!-- ═══ HEADER ══════════════════════════════════════════════════════════ -->
   <div id="hdr">
     <div id="logos">
-      <img src="/static/rancher-logo.svg" alt="Rancher" width="38" height="38"/>
-      <img src="/static/k8s-logo.svg"     alt="Kubernetes" width="34" height="34"/>
+      <img src="/static/rancher-logo.svg" alt="Rancher" width="36" height="36"/>
+      <img src="/static/k8s-logo.svg"     alt="K8s"     width="32" height="32"/>
     </div>
     <div id="title-block">
-      <div id="title" class="shiny">Cloudera ECS AI Ops</div>
+      <div id="ttl" class="shiny">Cloudera ECS AI Ops</div>
       <div id="subtitle">
-        <span id="subtitle-text">Air-gapped · loading...</span>
-        <div id="tt-wrap">
-          <div id="tt-btn" title="Model info">?</div>
-        </div>
+        <span id="sub-txt">Air-gapped &middot; loading&hellip;</span>
+        <!-- Tooltip trigger — click to open -->
+        <button id="tt-btn" title="Click for model info">?</button>
       </div>
     </div>
     <div id="hdr-right">
-      <!-- Plain text email, no obfuscation -->
       <a id="email-link" href="mailto:dennislee@cloudera.com">&#9993; dennislee@cloudera.com</a>
       <div id="theme-row">
         <span id="theme-label">THEME</span>
-        <button class="tdot" id="dot-midnight" data-theme="midnight"
+        <button class="tdot active" data-theme="midnight"
           style="background:linear-gradient(135deg,#38bdf8,#818cf8)" title="Midnight"></button>
-        <button class="tdot" id="dot-singapore" data-theme="singapore"
-          style="background:linear-gradient(135deg,#ef4444,#991b1b)" title="Singapore"></button>
-        <button class="tdot" id="dot-cloudera" data-theme="cloudera"
-          style="background:linear-gradient(135deg,#f96702,#fdd0aa)" title="Cloudera"></button>
+        <button class="tdot" data-theme="singapore"
+          style="background:linear-gradient(135deg,#EF3340,#b31a27)" title="Singapore"></button>
+        <button class="tdot" data-theme="cloudera"
+          style="background:linear-gradient(135deg,#F96702,#fdd0aa)" title="Cloudera"></button>
         <span id="theme-name">Midnight</span>
       </div>
       <div id="ready-row">
-        <div id="ready-dot"></div>
-        <span id="ready-text">ready</span>
+        <div id="rdot" style="background:#22c55e;box-shadow:0 0 8px #22c55e88"></div>
+        <span id="rtxt">ready</span>
       </div>
     </div>
   </div>
 
-  <!-- Tooltip box — positioned by JS, outside header flow -->
+  <!-- ═══ TOOLTIP (fixed, JS-positioned) ══════════════════════════════════ -->
   <div id="tt-box">
-    <div id="tt-mode" style="font-weight:700;margin-bottom:8px;font-size:13px"></div>
-    <div style="margin-bottom:4px">Model: <span id="tt-model" style="color:var(--bodyText)"></span></div>
-    <div id="tt-embed" style="margin-bottom:4px"></div>
-    <div id="tt-chroma" style="margin-bottom:4px"></div>
-    <div id="tt-note" style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;font-size:12px"></div>
+    <div id="tt-mode" style="font-weight:700;font-size:13px;margin-bottom:10px"></div>
+    <div class="tt-row"><span class="tt-key">Model&nbsp;&nbsp;</span><span class="tt-val" id="tt-model"></span></div>
+    <div class="tt-row"><span class="tt-key">Embed&nbsp;&nbsp;</span><span class="tt-val" id="tt-embed"></span></div>
+    <div class="tt-row"><span class="tt-key">ChromaDB</span><span class="tt-val" id="tt-chroma" style="font-size:11px;word-break:break-all"></span></div>
+    <div id="tt-note"></div>
   </div>
 
+  <!-- ═══ BODY ═════════════════════════════════════════════════════════════ -->
   <div id="body">
+
+    <!-- Chat column -->
     <div id="chat-col">
       <div id="messages">
         <div id="examples">
-          <div id="examples-label">EXAMPLE QUERIES</div>
-          <div id="examples-btns"></div>
+          <div id="ex-label">EXAMPLE QUERIES</div>
+          <div id="ex-btns"></div>
         </div>
       </div>
       <div id="input-bar">
         <textarea id="chat-input" rows="2"
-          placeholder="Ask about cluster health, Longhorn storage, pod issues, logs, events… (Enter to send)"></textarea>
+          placeholder="Ask about cluster health, Longhorn storage, pod issues, logs, events&hellip; (Enter to send)"></textarea>
         <button id="send-btn">&#8594; Send</button>
       </div>
     </div>
 
+    <!-- Right panels -->
     <div id="panels">
-      <!-- CPU Panel -->
-      <div class="side-panel" id="cpu-panel">
-        <div class="phdr">
-          <span class="phdr-title">CPU MONITOR</span>
-          <span class="phdr-sub" id="cpu-freq-lbl">&#8212; GHz</span>
+
+      <!-- ── CPU Panel ─────────────────────────────────────────────────── -->
+      <div class="panel" id="cpu-panel">
+        <div class="ph">
+          <span class="ph-title">CPU MONITOR</span>
+          <span class="ph-sub" id="cpu-freq-lbl">&mdash; GHz</span>
         </div>
-        <div id="cpu-spark-section">
-          <div id="spark-wrap">
-            <svg id="sparkline" width="266" height="28" style="display:block"></svg>
-            <span id="spark-lbl">60s</span>
+
+        <!-- Sparkline + dotbar -->
+        <div class="psec">
+          <div class="spark-wrap">
+            <svg id="sparkline" width="264" height="28" style="display:block"></svg>
+            <span class="spark-lbl">60s</span>
           </div>
-          <div id="cpu-bar-row">
-            <span style="color:var(--cpuLabel);min-width:28px;font-size:12px">CPU</span>
-            <div id="cpu-dotbar" style="flex:1;display:flex;gap:1px;align-items:center;overflow:hidden"></div>
-            <span id="cpu-total-pct" style="min-width:38px;text-align:right;font-weight:700;font-size:13px;color:var(--cpuLabel)"></span>
+          <!-- CPU utilisation row with dotbar -->
+          <div class="util-row" style="margin-bottom:8px">
+            <span class="util-lbl">CPU</span>
+            <div id="cpu-dotbar"></div>
+            <span id="cpu-total-pct" class="util-pct">&mdash;</span>
           </div>
         </div>
+
+        <!-- Per-core grid -->
         <div id="cores-grid"></div>
-        <div class="ram-section">
-          <div class="ram-title">RAM MONITOR</div>
-          <div class="ram-row">
-            <span class="ram-lbl">RAM</span>
-            <div class="ram-track"><div id="ram-fill" class="ram-fill"></div></div>
-            <span id="ram-val" class="ram-val">&#8212;</span>
+
+        <!-- Memory utilisation -->
+        <div class="psec" style="border-top:1px solid var(--panelBorder);padding-top:8px">
+          <div style="color:var(--panelLabel);font-weight:700;font-size:11px;letter-spacing:.04em;margin-bottom:6px">MEMORY UTILISATION</div>
+          <div class="util-row">
+            <span class="util-lbl">MEM</span>
+            <div class="ubar-wrap" id="mem-bar-wrap">
+              <div id="mem-fill" class="ubar-fill"></div>
+              <div class="ubar-dots"></div>
+            </div>
+            <span id="mem-pct" class="util-pct">&mdash;</span>
           </div>
+          <div style="text-align:right;font-size:10px;color:var(--panelDim);margin-top:2px" id="mem-gb">&mdash;</div>
         </div>
-        <div class="pfooter">
-          <span class="phdr-title">LOAD AVG</span>
-          <span id="load-avg" style="color:var(--dimText);font-size:13px;letter-spacing:.05em">&#8212;</span>
+
+        <!-- Load avg -->
+        <div class="load-sec">
+          <span class="load-title">LOAD AVG</span>
+          <span id="load-avg">&mdash;</span>
+        </div>
+
+        <!-- Inference footer -->
+        <div class="pf">
+          <span class="ph-title">INFERENCE</span>
+          <div class="infer-badge" id="infer-badge-cpu">
+            <div class="infer-dot" id="infer-dot-cpu" style="background:#64748b"></div>
+            <span id="infer-txt-cpu" style="color:var(--panelDim)">loading&hellip;</span>
+          </div>
         </div>
       </div>
 
-      <!-- GPU Panel -->
-      <div class="side-panel" id="gpu-panel" style="display:none">
-        <div class="phdr">
-          <span class="phdr-title">GPU MONITOR</span>
-          <span class="phdr-sub" id="gpu-count-lbl"></span>
+      <!-- ── GPU Panel (shown only when GPUs present) ───────────────────── -->
+      <div class="panel" id="gpu-panel" style="display:none">
+        <div class="ph">
+          <span class="ph-title">GPU MONITOR</span>
+          <span class="ph-sub" id="gpu-count-lbl"></span>
         </div>
-        <div id="gpu-cards" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:14px"></div>
-        <div class="pfooter">
-          <span class="phdr-title">INFERENCE</span>
-          <span style="color:#22c55e;font-size:12px">&#9889; GPU Active</span>
+        <div class="gpu-cards-wrap" id="gpu-cards"></div>
+        <div class="pf">
+          <span class="ph-title">INFERENCE</span>
+          <div class="infer-badge" id="infer-badge-gpu">
+            <div class="infer-dot" style="background:#22c55e;box-shadow:0 0 6px #22c55e88"></div>
+            <span style="color:#22c55e">GPU Active</span>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
-</div>
+
+    </div><!-- #panels -->
+  </div><!-- #body -->
+</div><!-- #app -->
 
 <script>
 (function(){
 'use strict';
 
-// ─── THEMES ───────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// THEMES
+// ═══════════════════════════════════════════════════════════════════════════
 const THEMES = {
   midnight:{
-    name:'Midnight',solid:false,
+    name:'Midnight', shimmer:true,
     '--bg':'#030712','--headerBg':'#070d1a','--border':'#0f1f35',
     '--accent':'#38bdf8','--accent2':'#7dd3fc',
     '--msgBg':'#070d1a','--inputBg':'#0a0f1e',
     '--userBg':'#0f172a','--userBorder':'#1e293b',
     '--statusBg':'#040b14','--dimText':'#475569','--bodyText':'#cbd5e1',
     '--tooltipBg':'#0a1628','--tooltipText':'#94a3b8',
-    '--cpuBg':'#020a14','--cpuBorder':'#0f1f35','--cpuLabel':'#7dd3fc',
+    '--panelBg':'#020a14','--panelBorder':'#0f1f35','--panelLabel':'#7dd3fc','--panelDim':'#475569',
     '--textMain':'#e2e8f0','--inputText':'#e2e8f0',
     '--shimmer':'linear-gradient(90deg,#38bdf8 0%,#818cf8 25%,#c084fc 50%,#38bdf8 75%,#00C1DE 100%)',
   },
   singapore:{
-    name:'Singapore',solid:false,
-    '--bg':'#0d0000','--headerBg':'#1a0000','--border':'#4a0000',
-    '--accent':'#c41e1e','--accent2':'#ffffff',
-    '--msgBg':'#1a0000','--inputBg':'#110000',
-    '--userBg':'#220000','--userBorder':'#4a0000',
-    '--statusBg':'#0d0000','--dimText':'#e5e5e5','--bodyText':'#ffffff',
-    '--tooltipBg':'#1a0000','--tooltipText':'#ffffff',
-    '--cpuBg':'#0d0000','--cpuBorder':'#4a0000','--cpuLabel':'#ffffff',
-    '--textMain':'#ffffff','--inputText':'#ffffff',
-    '--shimmer':'linear-gradient(90deg,#c41e1e 0%,#ef4444 30%,#991b1b 60%,#c41e1e 100%)',
+    // #EF3340 accent on white background
+    name:'Singapore', shimmer:false, solidTitle:'#EF3340',
+    '--bg':'#ffffff','--headerBg':'#ffffff','--border':'#fbd0d3',
+    '--accent':'#EF3340','--accent2':'#b31a27',
+    '--msgBg':'#fff5f5','--inputBg':'#ffffff',
+    '--userBg':'#fff0f0','--userBorder':'#fbd0d3',
+    '--statusBg':'#fff5f5','--dimText':'#9b1c1c','--bodyText':'#1a0000',
+    '--tooltipBg':'#ffffff','--tooltipText':'#1a0000',
+    '--panelBg':'#fff5f5','--panelBorder':'#fbd0d3','--panelLabel':'#EF3340','--panelDim':'#9b1c1c',
+    '--textMain':'#1a0000','--inputText':'#1a0000',
+    '--shimmer':'linear-gradient(90deg,#EF3340 0%,#ff6b74 40%,#EF3340 80%)',
   },
   cloudera:{
-    name:'Cloudera',solid:true,titleSolid:'#f96702',
-    '--bg':'#ffffff','--headerBg':'#ffffff','--border':'#fed7aa',
-    '--accent':'#f96702','--accent2':'#ea580c',
-    '--msgBg':'#fff7ed','--inputBg':'#ffffff',
-    '--userBg':'#ffedd5','--userBorder':'#fed7aa',
-    '--statusBg':'#fff7ed','--dimText':'#9a3412','--bodyText':'#431407',
-    '--tooltipBg':'#ffffff','--tooltipText':'#431407',
-    '--cpuBg':'#ffffff','--cpuBorder':'#fed7aa','--cpuLabel':'#f96702',
+    // #F96702 on light grey background
+    name:'Cloudera', shimmer:false, solidTitle:'#F96702',
+    '--bg':'#f3f4f6','--headerBg':'#f9fafb','--border':'#e5c9b0',
+    '--accent':'#F96702','--accent2':'#c45202',
+    '--msgBg':'#ffffff','--inputBg':'#f9fafb',
+    '--userBg':'#fef3e7','--userBorder':'#fdd0aa',
+    '--statusBg':'#fef9f5','--dimText':'#7c4a1e','--bodyText':'#2d1200',
+    '--tooltipBg':'#ffffff','--tooltipText':'#2d1200',
+    '--panelBg':'#f9fafb','--panelBorder':'#e5c9b0','--panelLabel':'#F96702','--panelDim':'#7c4a1e',
     '--textMain':'#1c0a00','--inputText':'#1c0a00',
-    '--shimmer':'linear-gradient(90deg,#f96702 0%,#ea580c 30%,#fb923c 60%,#f96702 100%)',
+    '--shimmer':'linear-gradient(90deg,#F96702 0%,#ea580c 30%,#fb923c 60%,#F96702 100%)',
   },
 };
 
-let currentTheme = 'midnight';
+let curTheme = 'midnight';
 
 function applyTheme(name){
   const t = THEMES[name];
   if(!t) return;
   const root = document.documentElement;
   Object.entries(t).forEach(([k,v])=>{ if(k.startsWith('--')) root.style.setProperty(k,v); });
-  if(t.solid && t.titleSolid){
-    root.style.setProperty('--titleSolid', t.titleSolid);
-    document.getElementById('title').className = 'shiny-solid';
-  } else {
-    document.getElementById('title').className = 'shiny';
-  }
-  currentTheme = name;
+  curTheme = name;
   document.getElementById('theme-name').textContent = t.name;
-  document.querySelectorAll('.tdot').forEach(btn=>{
-    btn.classList.toggle('active', btn.dataset.theme === name);
+  const ttl = document.getElementById('ttl');
+  if(t.shimmer){
+    ttl.className = 'shiny';
+  } else {
+    root.style.setProperty('--solidTitle', t.solidTitle||'#333');
+    ttl.className = 'shiny-solid';
+  }
+  document.querySelectorAll('.tdot').forEach(b=>{
+    b.classList.toggle('active', b.dataset.theme === name);
   });
 }
 
-// Wire up theme dots — direct onclick avoids any event delegation issues
 document.querySelectorAll('.tdot').forEach(btn=>{
   btn.onclick = function(){ applyTheme(this.dataset.theme); };
 });
 
-// ─── TOOLTIP — JS-driven, fixed positioning ───────────────────────────────────
-const ttBtn  = document.getElementById('tt-btn');
-const ttBox  = document.getElementById('tt-box');
-let   ttOpen = false;
+// ═══════════════════════════════════════════════════════════════════════════
+// TOOLTIP — click to open/close, click outside to close
+// ═══════════════════════════════════════════════════════════════════════════
+const ttBtn = document.getElementById('tt-btn');
+const ttBox = document.getElementById('tt-box');
+let ttOpen  = false;
 
-function positionTooltip(){
+function posTooltip(){
   const r = ttBtn.getBoundingClientRect();
-  ttBox.style.top  = (r.bottom + 6) + 'px';
-  // Keep within right edge
-  const left = Math.min(r.left, window.innerWidth - 296);
-  ttBox.style.left = Math.max(4, left) + 'px';
+  ttBox.style.top  = (r.bottom + 8) + 'px';
+  const left = Math.min(r.left - 200, window.innerWidth - 300);
+  ttBox.style.left = Math.max(8, left) + 'px';
 }
 
-ttBtn.addEventListener('click', function(e){
+ttBtn.onclick = function(e){
   e.stopPropagation();
   ttOpen = !ttOpen;
-  positionTooltip();
-  ttBox.classList.toggle('visible', ttOpen);
+  if(ttOpen) posTooltip();
+  ttBox.classList.toggle('open', ttOpen);
+};
+document.addEventListener('click', function(e){
+  if(ttOpen && !ttBox.contains(e.target)){
+    ttOpen = false;
+    ttBox.classList.remove('open');
+  }
 });
-document.addEventListener('click', function(){
-  if(ttOpen){ ttOpen=false; ttBox.classList.remove('visible'); }
-});
-ttBox.addEventListener('click', function(e){ e.stopPropagation(); });
 
-// ─── EXAMPLES ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// EXAMPLE QUERIES
+// ═══════════════════════════════════════════════════════════════════════════
 const EXAMPLES = [
   'Check overall cluster health',
   'Are there any warning events in the cluster?',
@@ -440,73 +523,92 @@ const EXAMPLES = [
   'Check Longhorn storage health',
   'Are there any Longhorn volume issues?',
 ];
-const exBtns = document.getElementById('examples-btns');
+const exBtns = document.getElementById('ex-btns');
 EXAMPLES.forEach(ex=>{
-  const btn = document.createElement('button');
-  btn.className = 'ex-btn';
-  btn.textContent = ex;
-  btn.onclick = ()=> sendMessage(ex);
-  exBtns.appendChild(btn);
+  const b = document.createElement('button');
+  b.className   = 'ex-btn';
+  b.textContent = ex;
+  b.onclick     = ()=> sendMessage(ex);
+  exBtns.appendChild(b);
 });
 
-// ─── HEALTH → populate tooltip ────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// HEALTH — populate subtitle + tooltip
+// ═══════════════════════════════════════════════════════════════════════════
 let modelName = 'qwen2.5:7b';
+let isGpu     = false;
+
+function updateInferenceBadge(){
+  const dot  = document.getElementById('infer-dot-cpu');
+  const txt  = document.getElementById('infer-txt-cpu');
+  if(isGpu){
+    dot.style.background  = '#22c55e';
+    dot.style.boxShadow   = '0 0 6px #22c55e88';
+    txt.textContent       = '\u26A1 GPU (' + modelName + ')';
+    txt.style.color       = '#22c55e';
+  } else {
+    dot.style.background  = '#f59e0b';
+    dot.style.boxShadow   = '0 0 6px #f59e0b88';
+    txt.textContent       = '\u2699\uFE0F CPU (' + modelName + ')';
+    txt.style.color       = '#f59e0b';
+  }
+}
 
 fetch('/health').then(r=>r.json()).then(d=>{
   modelName = d.model || 'qwen2.5:7b';
-  const isGpu  = (d.num_gpu || 0) > 0;
-  const isLocal = d.model_source === 'local_dir';
-  const isLocalEmbed = d.embed_source === 'local_dir';
+  isGpu     = (d.num_gpu || 0) > 0;
 
-  document.getElementById('subtitle-text').textContent = 'Air-gapped \u00b7 ' + modelName;
+  document.getElementById('sub-txt').textContent =
+    'Air-gapped \u00b7 ' + modelName;
 
   const modeEl = document.getElementById('tt-mode');
-  modeEl.textContent = isGpu ? '\uD83D\uDDA5\uFE0F  GPU Inference' : '\u2699\uFE0F  CPU Inference';
-  modeEl.style.color = 'var(--accent2)';
+  modeEl.textContent = isGpu
+    ? '\uD83D\uDDA5\uFE0F  GPU Inference \u2014 Active'
+    : '\u2699\uFE0F  CPU Inference \u2014 Active';
+  modeEl.style.color = isGpu ? '#22c55e' : '#f59e0b';
 
-  document.getElementById('tt-model').textContent = modelName +
-    (isLocal ? ' (local dir)' : ' via Ollama');
-
+  document.getElementById('tt-model').textContent =
+    modelName + (d.model_source==='local_dir' ? ' (local)' : ' via Ollama');
   document.getElementById('tt-embed').textContent =
-    'Embed: ' + (isLocalEmbed ? 'local sentence-transformers' : 'Ollama endpoint');
-  document.getElementById('tt-embed').style.color = 'var(--dimText)';
-
+    d.embed_source==='local_dir' ? 'local sentence-transformers' : 'Ollama endpoint';
   if(d.chroma_dir){
-    document.getElementById('tt-chroma').textContent = 'ChromaDB: ' + d.chroma_dir;
-    document.getElementById('tt-chroma').style.color = 'var(--dimText)';
+    document.getElementById('tt-chroma').textContent = d.chroma_dir;
+  }
+  const note = document.getElementById('tt-note');
+  if(!isGpu){
+    note.style.color = '#f59e0b';
+    note.textContent = '\u26A0 CPU mode \u2014 responses may take 30\u201390s.';
+  } else {
+    note.style.color = '#22c55e';
+    note.textContent = '\u2713 GPU acceleration active.';
   }
 
-  const noteEl = document.getElementById('tt-note');
-  if(!isGpu){
-    noteEl.style.color = '#f59e0b';
-    noteEl.textContent = '\u26A0 Running on CPU. Responses may take 30\u201390 seconds.';
-  } else {
-    noteEl.style.color = '#22c55e';
-    noteEl.textContent = '\u2713 GPU acceleration active. Responses will be faster.';
-  }
+  updateInferenceBadge();
 }).catch(()=>{
-  document.getElementById('subtitle-text').textContent = 'Air-gapped \u00b7 (backend not reachable)';
+  document.getElementById('sub-txt').textContent = 'Air-gapped \u00b7 backend unreachable';
 });
 
-// ─── CHAT ─────────────────────────────────────────────────────────────────────
-let loading = false;
-const messagesEl = document.getElementById('messages');
-const inputEl    = document.getElementById('chat-input');
-const sendBtn    = document.getElementById('send-btn');
-const readyDot   = document.getElementById('ready-dot');
-const readyText  = document.getElementById('ready-text');
-const examplesEl = document.getElementById('examples');
+// ═══════════════════════════════════════════════════════════════════════════
+// CHAT
+// ═══════════════════════════════════════════════════════════════════════════
+let loading  = false;
+const msgsEl = document.getElementById('messages');
+const inpEl  = document.getElementById('chat-input');
+const sndBtn = document.getElementById('send-btn');
+const rdot   = document.getElementById('rdot');
+const rtxt   = document.getElementById('rtxt');
+const exDiv  = document.getElementById('examples');
 
 function setLoading(v){
   loading = v;
-  sendBtn.disabled = v;
-  sendBtn.textContent = v ? '...' : '\u2192 Send';
+  sndBtn.disabled   = v;
+  sndBtn.textContent = v ? '...' : '\u2192 Send';
   if(v){
-    readyDot.style.cssText = 'background:#f59e0b;box-shadow:0 0 8px #f59e0b88;animation:pls 1s infinite';
-    readyText.textContent  = 'thinking';
+    rdot.style.cssText = 'background:#f59e0b;box-shadow:0 0 8px #f59e0b88;width:7px;height:7px;border-radius:50%;flex-shrink:0;animation:pls 1s infinite';
+    rtxt.textContent   = 'thinking';
   } else {
-    readyDot.style.cssText = 'background:#22c55e;box-shadow:0 0 8px #22c55e88;animation:none';
-    readyText.textContent  = 'ready';
+    rdot.style.cssText = 'background:#22c55e;box-shadow:0 0 8px #22c55e88;width:7px;height:7px;border-radius:50%;flex-shrink:0;animation:none';
+    rtxt.textContent   = 'ready';
   }
 }
 
@@ -515,15 +617,14 @@ function esc(s){
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+function scrollBot(){ msgsEl.scrollTop = msgsEl.scrollHeight; }
 
-function scrollBot(){ messagesEl.scrollTop = messagesEl.scrollHeight; }
-
-function appendUserMsg(text){
-  examplesEl.style.display = 'none';
+function appendUser(text){
+  exDiv.style.display = 'none';
   const d = document.createElement('div');
   d.className = 'msg-user fade-up';
   d.innerHTML = '<div class="msg-user-bubble">'+esc(text)+'</div>';
-  messagesEl.appendChild(d);
+  msgsEl.appendChild(d);
   scrollBot();
 }
 
@@ -532,122 +633,140 @@ function showThinking(updates){
   removeThinking();
   thinkEl = document.createElement('div');
   thinkEl.className = 'status-box fade-up';
-  let rows = '<div class="status-label">AGENT STATUS</div>';
+  let h = '<div class="s-label">AGENT STATUS</div>';
   updates.forEach((u,i)=>{
-    const cls = i===updates.length-1 ? 'status-line active' : 'status-line';
-    rows += '<div class="'+cls+'"><span>'+(i===updates.length-1?'›':'✓')+'</span>'+esc(u)+'</div>';
+    const cur = i===updates.length-1;
+    h += '<div class="s-line'+(cur?' cur':'')+'"><span>'+(cur?'&#8250;':'&#10003;')+'</span>'+esc(u)+'</div>';
   });
-  rows += '<div class="sdots"><div class="sdot" style="animation-delay:0s"></div>'
-        + '<div class="sdot" style="animation-delay:.2s"></div>'
-        + '<div class="sdot" style="animation-delay:.4s"></div></div>';
-  thinkEl.innerHTML = rows;
-  messagesEl.appendChild(thinkEl);
+  h += '<div class="sdots">'
+     + '<div class="sdot" style="animation-delay:0s"></div>'
+     + '<div class="sdot" style="animation-delay:.2s"></div>'
+     + '<div class="sdot" style="animation-delay:.4s"></div>'
+     + '</div>';
+  thinkEl.innerHTML = h;
+  msgsEl.appendChild(thinkEl);
   scrollBot();
 }
-function removeThinking(){ if(thinkEl){ thinkEl.remove(); thinkEl=null; } }
+function removeThinking(){ if(thinkEl){thinkEl.remove();thinkEl=null;} }
 
-function appendAiMsg(text, tools, iterations, elapsed){
-  const d = document.createElement('div');
-  d.className = 'msg-ai fade-up';
-  const unique = [...new Set(tools||[])];
-  const badges = unique.map(t=>
-    '<span class="tool-badge">'+(t==='search_documentation'?'\uD83D\uDCDA':'\u2699\uFE0F')+' '+esc(t)+'</span>'
+// Format AI response — strip raw system-prompt leakage, render markdown-lite
+function formatResponse(raw){
+  // Strip any leaked system prompt markers
+  let text = raw.replace(/<\|im_start\|>[\s\S]*?<\|im_end\|>/g, '').trim();
+  // Also strip if it starts with <|im_start|> and we can't find end
+  if(text.startsWith('<|im_start|>')){
+    const idx = text.lastIndexOf('<|im_start|>user');
+    if(idx !== -1) text = text.slice(idx).replace('<|im_start|>user','').replace('<|im_end|>','').trim();
+    else text = text.replace(/<\|im_start\|>\w+/g,'').replace(/<\|im_end\|>/g,'').trim();
+  }
+  // Trim any leading/trailing assistant marker
+  text = text.replace(/^<\|im_start\|>assistant\s*/,'').replace(/<\|im_end\|>\s*$/,'').trim();
+  return text;
+}
+
+function appendAi(text, tools, iters, elapsed){
+  const clean   = formatResponse(text);
+  const unique  = [...new Set(tools||[])];
+  const badges  = unique.map(t=>
+    '<span class="tbadge">'+(t==='search_documentation'?'\uD83D\uDCDA':'\u2699\uFE0F')+' '+esc(t)+'</span>'
   ).join('');
   const toolRow = unique.length
-    ? '<div class="msg-tools"><span class="tools-meta">called:</span>'+badges
-      +'<span class="tools-meta">\u00b7 '+iterations+' iteration'+(iterations!==1?'s':'')+'</span></div>'
+    ? '<div class="ai-tools"><span class="tmeta">called:</span>'+badges
+      +'<span class="tmeta">&middot; '+iters+' iter'+(iters!==1?'s':'')+'</span></div>'
     : '';
-  const elRow = elapsed!=null
-    ? '<div class="msg-elapsed">\u23f1 '+elapsed+'s total</div>' : '';
+  const d = document.createElement('div');
+  d.className = 'msg-ai fade-up';
   d.innerHTML =
-    '<div class="msg-ai-icon">'
+    '<div class="ai-icon">'
     +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none">'
     +'<path d="M12 2L3 7v10l9 5 9-5V7L12 2z" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round"/>'
-    +'<circle cx="12" cy="12" r="3" stroke="var(--accent)" stroke-width="1.8"/></svg></div>'
-    +'<div class="msg-ai-body">'
-    +'<div class="msg-ai-bubble">'+esc(text)+'</div>'
-    + elRow + toolRow
+    +'<circle cx="12" cy="12" r="3" stroke="var(--accent)" stroke-width="1.8"/>'
+    +'</svg></div>'
+    +'<div class="ai-body">'
+    +'<div class="ai-bubble">'+esc(clean)+'</div>'
+    +(elapsed!=null?'<div class="ai-elapsed">&#8987; '+elapsed+'s</div>':'')
+    +toolRow
     +'</div>';
-  messagesEl.appendChild(d);
+  msgsEl.appendChild(d);
   scrollBot();
 }
 
 async function sendMessage(override){
-  const query = override || inputEl.value.trim();
-  if(!query || loading) return;
-  inputEl.value = '';
+  const q = override || inpEl.value.trim();
+  if(!q || loading) return;
+  inpEl.value = '';
   setLoading(true);
-  appendUserMsg(query);
-  const q = query.toLowerCase();
-  let hint = '\uD83D\uDD0D Analysing query\u2026';
-  if(q.includes('longhorn'))    hint='\uD83D\uDD0D Checking Longhorn storage\u2026';
-  else if(q.includes('health')) hint='\uD83D\uDD0D Scanning cluster health\u2026';
-  else if(q.includes('log'))    hint='\uD83D\uDD0D Fetching pod logs\u2026';
-  else if(q.includes('node'))   hint='\uD83D\uDD0D Checking node status\u2026';
-  else if(q.includes('event'))  hint='\uD83D\uDD0D Fetching cluster events\u2026';
-  else if(q.includes('deploy')) hint='\uD83D\uDD0D Checking deployments\u2026';
+  appendUser(q);
+  const ql = q.toLowerCase();
+  let hint = '\uD83D\uDD0D Analysing\u2026';
+  if(ql.includes('longhorn'))    hint='\uD83D\uDD0D Checking Longhorn\u2026';
+  else if(ql.includes('health')) hint='\uD83D\uDD0D Scanning cluster health\u2026';
+  else if(ql.includes('log'))    hint='\uD83D\uDD0D Fetching pod logs\u2026';
+  else if(ql.includes('node'))   hint='\uD83D\uDD0D Checking nodes\u2026';
+  else if(ql.includes('event'))  hint='\uD83D\uDD0D Fetching events\u2026';
+  else if(ql.includes('deploy')) hint='\uD83D\uDD0D Checking deployments\u2026';
   showThinking(['\uD83E\uDD16 Model: '+modelName, hint]);
   try{
     const res = await fetch('/chat',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message:query}),
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message:q}),
     });
-    if(!res.ok){ const e=await res.json(); throw new Error(e.detail||'Request failed'); }
+    if(!res.ok){ const e=await res.json(); throw new Error(e.detail||'HTTP '+res.status); }
     const data = await res.json();
     removeThinking();
-    appendAiMsg(data.response, data.tools_used, data.iterations, data.elapsed_seconds);
-  }catch(err){
+    appendAi(data.response, data.tools_used, data.iterations, data.elapsed_seconds);
+  } catch(err){
     removeThinking();
-    appendAiMsg('\u26A0 Error: '+err.message+'\n\nCheck that the backend is running:\n  python3 app.py',[],0,null);
-  }finally{
+    appendAi('\u26A0 Error: '+err.message+'\n\nMake sure the backend is running:\n  python3 app.py', [], 0, null);
+  } finally {
     setLoading(false);
   }
 }
-
-sendBtn.onclick = ()=> sendMessage();
-inputEl.addEventListener('keydown', e=>{
+sndBtn.onclick = ()=> sendMessage();
+inpEl.addEventListener('keydown', e=>{
   if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); }
 });
 
-// ─── METRICS ──────────────────────────────────────────────────────────────────
-const sparkPts = [];
-const SW=266, SH=28;
+// ═══════════════════════════════════════════════════════════════════════════
+// METRICS POLLING
+// ═══════════════════════════════════════════════════════════════════════════
+const sparkPts  = [];
+const SW=264, SH=28;
 
 function cpuCol(p){
-  if(p<40) return 'hsl('+(120-p*1.5)+',100%,45%)';
-  if(p<70) return 'hsl('+(60-(p-40)*1.5)+',100%,50%)';
-  return 'hsl('+(25-(p-70)*0.8)+',100%,50%)';
+  if(p<40) return 'hsl('+(120-p*1.5)+',90%,42%)';
+  if(p<70) return 'hsl('+(60-(p-40)*1.5)+',100%,48%)';
+  return           'hsl('+(25-(p-70)*0.8)+',100%,50%)';
 }
 function gpuCol(p){
-  if(p<50) return 'hsl('+(200-p*0.4)+',100%,55%)';
-  if(p<80) return 'hsl('+(180-(p-50)*4)+',100%,50%)';
-  return 'hsl('+(60-(p-80)*3)+',100%,50%)';
+  if(p<50) return 'hsl('+(200-p*0.4)+',100%,52%)';
+  if(p<80) return 'hsl('+(180-(p-50)*4)+',100%,48%)';
+  return           'hsl('+(60-(p-80)*3)+',100%,48%)';
 }
 function tempCol(c){ return c<60?'#22c55e':c<75?'#f59e0b':'#ef4444'; }
 
-function renderDotBar(el, pct){
-  const COLS=33, filled=Math.round((pct/100)*COLS);
+function renderDots(el, pct){
+  const N=32, filled=Math.round((pct/100)*N);
   let h='';
-  for(let i=0;i<COLS;i++){
-    const a=i<filled, col=a?cpuCol((i/COLS)*100):'transparent';
-    h+='<div style="width:4px;height:8px;border-radius:1px;flex-shrink:0;background:'
-      +col+';border:1px solid '+(a?col:'var(--cpuBorder)22')+'"></div>';
+  for(let i=0;i<N;i++){
+    const a=i<filled, col=a?cpuCol((i/N)*100):'transparent';
+    h+='<div style="width:4px;height:8px;border-radius:1px;flex-shrink:0;background:'+col
+      +';border:1px solid '+(a?col:'var(--panelBorder)22')+'"></div>';
   }
   el.innerHTML=h;
 }
 
-function renderSpark(svg, pts, totalPct){
+function renderSpark(svg, pts, pct){
   if(pts.length<2){svg.innerHTML='';return;}
-  const col=cpuCol(totalPct);
-  const poly=pts.map((v,i)=>{
-    const x=(i/59)*SW, y=SH-(v/100)*SH; return x+','+y;
-  }).join(' ');
-  svg.innerHTML='<defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">'
-    +'<stop offset="0%" stop-color="'+col+'" stop-opacity="0.4"/>'
-    +'<stop offset="100%" stop-color="'+col+'" stop-opacity="0.05"/>'
+  const col=cpuCol(pct);
+  const pts2=pts.map((v,i)=>((i/59)*SW)+','+(SH-(v/100)*SH)).join(' ');
+  svg.innerHTML=
+    '<defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">'
+    +'<stop offset="0%" stop-color="'+col+'" stop-opacity="0.35"/>'
+    +'<stop offset="100%" stop-color="'+col+'" stop-opacity="0.03"/>'
     +'</linearGradient></defs>'
-    +'<polyline points="'+poly+'" fill="none" stroke="'+col+'" stroke-width="1.5"/>'
-    +'<polygon points="0,'+SH+' '+poly+' '+SW+','+SH+'" fill="url(#sg)"/>';
+    +'<polyline points="'+pts2+'" fill="none" stroke="'+col+'" stroke-width="1.5"/>'
+    +'<polygon points="0,'+SH+' '+pts2+' '+SW+','+SH+'" fill="url(#sg)"/>';
 }
 
 function renderCores(el, cores){
@@ -656,116 +775,125 @@ function renderCores(el, cores){
   let h='';
   for(let ci=0;ci<cols;ci++){
     h+='<div class="core-col">';
-    const grp=cores.slice(ci*perCol,(ci+1)*perCol);
-    grp.forEach((pct,i)=>{
+    cores.slice(ci*perCol,(ci+1)*perCol).forEach((pct,i)=>{
       const idx=ci*perCol+i, col=cpuCol(pct), hot=pct>80;
       h+='<div class="core-row">'
         +'<span class="core-lbl">C'+(idx+1)+'</span>'
         +'<div class="core-track"><div class="core-bg"></div>'
         +'<div class="core-fill" style="width:'+pct+'%;background:'+col+'"></div>'
         +'<div class="core-dots"></div></div>'
-        +'<span class="core-pct'+(hot?' hot':'')+'"'+(hot?' style="color:'+col+';font-weight:700"':'')+'>'
-        +pct+'%</span></div>';
+        +'<span class="core-pct"'+(hot?' style="color:'+col+';font-weight:700"':'')+'>'+pct+'%</span></div>';
     });
     h+='</div>';
   }
   el.innerHTML=h;
 }
 
-function renderGpuCards(el, gpus){
+function renderGpus(el, gpus){
   el.innerHTML='';
   gpus.forEach(gpu=>{
     const uc=gpuCol(gpu.util_pct), mc=gpuCol(gpu.mem_pct), tc=tempCol(gpu.temp_c);
     const sn=gpu.name.replace(/NVIDIA\s*/i,'').replace(/GeForce\s*/i,'').trim();
-    const card=document.createElement('div');
-    card.className='gpu-card';
-    card.innerHTML=
-      '<div class="gpu-chdr"><span class="gpu-idx">GPU '+gpu.index+'</span>'
-      +'<span class="gpu-name" title="'+esc(gpu.name)+'">'+esc(sn)+'</span></div>'
-      +'<div><div class="bar-row"><span class="bar-lbl">Utilisation</span>'
-      +'<span class="bar-val" style="color:'+uc+'">'+gpu.util_pct+'%</span></div>'
-      +'<div class="gpu-track"><div class="gpu-fill" style="width:'+gpu.util_pct+'%;background:'+uc+';box-shadow:0 0 6px '+uc+'88"></div>'
-      +'<div class="gpu-stripe"></div></div></div>'
-      +'<div><div class="bar-row"><span class="bar-lbl">VRAM</span>'
-      +'<span class="bar-val" style="color:'+mc+';font-weight:400;font-size:11px">'+gpu.mem_used_gb+'/'+gpu.mem_total_gb+' GB</span></div>'
+    const c=document.createElement('div');
+    c.className='gpu-card';
+    c.innerHTML=
+      '<div class="gpu-chdr">'
+      +'<span class="gpu-idx">GPU '+gpu.index+'</span>'
+      +'<span class="gpu-name" title="'+esc(gpu.name)+'">'+esc(sn)+'</span>'
+      +'</div>'
+      // Utilisation bar
+      +'<div><div class="g-bar-row">'
+      +'<span class="g-bar-lbl">Utilisation</span>'
+      +'<span class="g-bar-val" style="color:'+uc+'">'+gpu.util_pct+'%</span>'
+      +'</div>'
+      +'<div class="g-track">'
+      +'<div class="g-fill" style="width:'+gpu.util_pct+'%;background:'+uc+';box-shadow:0 0 5px '+uc+'88"></div>'
+      +'<div class="g-stripe"></div></div></div>'
+      // VRAM bar
+      +'<div><div class="g-bar-row">'
+      +'<span class="g-bar-lbl">VRAM</span>'
+      +'<span class="g-bar-val" style="color:'+mc+';font-weight:400;font-size:11px">'+gpu.mem_used_gb+'/'+gpu.mem_total_gb+' GB</span>'
+      +'</div>'
       +'<div class="vram-track"><div class="vram-fill" style="width:'+gpu.mem_pct+'%;background:'+mc+'"></div></div></div>'
+      // Temp + power
       +'<div class="gpu-meta">'
-      +'<span>\uD83C\uDF21 <span style="color:'+tc+';font-weight:700">'+gpu.temp_c+'\u00b0C</span></span>'
-      +(gpu.power_w!=null?'<span>\u26A1 <span style="color:var(--dimText)">'+gpu.power_w+' W</span></span>':'')
+      +'<span style="color:'+tc+';font-weight:700">'+gpu.temp_c+'\u00b0C</span>'
+      +(gpu.power_w!=null?' <span style="color:var(--panelDim)">&#9889; '+gpu.power_w+' W</span>':'')
       +'</div>';
-    el.appendChild(card);
+    el.appendChild(c);
   });
 }
 
-const coresGridEl  = document.getElementById('cores-grid');
-const sparkSvg     = document.getElementById('sparkline');
-const cpuDotbar    = document.getElementById('cpu-dotbar');
-const cpuTotalPct  = document.getElementById('cpu-total-pct');
-const cpuFreqLbl   = document.getElementById('cpu-freq-lbl');
-const ramFill      = document.getElementById('ram-fill');
-const ramVal       = document.getElementById('ram-val');
-const loadAvg      = document.getElementById('load-avg');
-const gpuPanel     = document.getElementById('gpu-panel');
-const gpuCountLbl  = document.getElementById('gpu-count-lbl');
-const gpuCardsEl   = document.getElementById('gpu-cards');
-
-let metricsOk = false;
+// DOM refs
+const coresEl    = document.getElementById('cores-grid');
+const sparkEl    = document.getElementById('sparkline');
+const dotbarEl   = document.getElementById('cpu-dotbar');
+const cpuPctEl   = document.getElementById('cpu-total-pct');
+const cpuFreqEl  = document.getElementById('cpu-freq-lbl');
+const memFillEl  = document.getElementById('mem-fill');
+const memPctEl   = document.getElementById('mem-pct');
+const memGbEl    = document.getElementById('mem-gb');
+const loadEl     = document.getElementById('load-avg');
+const gpuPanel   = document.getElementById('gpu-panel');
+const gpuCntEl   = document.getElementById('gpu-count-lbl');
+const gpuCardsEl = document.getElementById('gpu-cards');
 
 async function pollMetrics(){
   try{
     const r = await fetch('/metrics');
     if(!r.ok) return;
     const d = await r.json();
-    metricsOk = true;
 
     // Sparkline
-    sparkPts.push(d.cpu_total);
-    if(sparkPts.length>60) sparkPts.shift();
-    renderSpark(sparkSvg, sparkPts, d.cpu_total);
+    sparkPts.push(d.cpu_total); if(sparkPts.length>60) sparkPts.shift();
+    renderSpark(sparkEl, sparkPts, d.cpu_total);
 
-    // Dotbar + total
-    renderDotBar(cpuDotbar, d.cpu_total);
-    cpuTotalPct.textContent = d.cpu_total+'%';
-    cpuTotalPct.style.color = cpuCol(d.cpu_total);
+    // CPU dotbar + pct
+    renderDots(dotbarEl, d.cpu_total);
+    cpuPctEl.textContent = d.cpu_total+'%';
+    cpuPctEl.style.color = cpuCol(d.cpu_total);
 
-    // Freq
-    const ghz = d.freq_mhz ? (d.freq_mhz/1000).toFixed(1)+' GHz' : '\u2014 GHz';
-    cpuFreqLbl.textContent = ghz + ' \u00b7 ' + (d.cpu_count||'?')+'C';
+    // Freq label
+    cpuFreqEl.textContent = (d.freq_mhz ? (d.freq_mhz/1000).toFixed(1)+' GHz' : '\u2014 GHz')
+                           + ' \u00b7 ' + (d.cpu_count||'?') + 'C';
 
-    // Cores
-    renderCores(coresGridEl, d.cpu_per_core||[]);
+    // Per-core grid
+    renderCores(coresEl, d.cpu_per_core||[]);
 
-    // RAM
-    ramFill.style.width      = (d.mem_pct||0)+'%';
-    ramFill.style.background = cpuCol(d.mem_pct||0);
-    ramVal.textContent = (d.mem_used_gb||0)+'/'+(d.mem_total_gb||0)+' GB';
+    // Memory utilisation (renamed from RAM)
+    const mp = d.mem_pct||0;
+    memFillEl.style.width      = mp+'%';
+    memFillEl.style.background = cpuCol(mp);
+    memPctEl.textContent       = mp+'%';
+    memPctEl.style.color       = cpuCol(mp);
+    memGbEl.textContent        = (d.mem_used_gb||0)+' / '+(d.mem_total_gb||0)+' GB';
 
     // Load avg
     const [a,b,c] = d.load_avg||[0,0,0];
-    loadAvg.textContent = a+'  '+b+'  '+c;
+    loadEl.textContent = a+'  '+b+'  '+c;
 
     // GPUs
     const gpus = d.gpus||[];
-    if(gpus.length>0){
-      gpuPanel.style.display='flex';
-      gpuCountLbl.textContent = gpus.length+' device'+(gpus.length>1?'s':'');
-      renderGpuCards(gpuCardsEl, gpus);
+    if(gpus.length > 0){
+      gpuPanel.style.display = 'flex';
+      gpuCntEl.textContent   = gpus.length+' device'+(gpus.length>1?'s':'');
+      renderGpus(gpuCardsEl, gpus);
     } else {
-      gpuPanel.style.display='none';
+      gpuPanel.style.display = 'none';
     }
-  }catch(e){
-    // silently retry
-  }
+
+  } catch(_){ /* retry silently */ }
 }
 
-// Start polling immediately, then every 1.5s
 pollMetrics();
 setInterval(pollMetrics, 1500);
 
-// ─── INIT ─────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════
 applyTheme('midnight');
 
-})(); // end IIFE — keeps all vars out of global scope
+})();
 </script>
 </body>
 </html>
