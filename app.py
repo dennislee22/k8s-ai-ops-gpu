@@ -17,6 +17,8 @@ Dependencies (pip install):
     fastapi uvicorn[standard] langchain-ollama langgraph langchain-core
     kubernetes python-dotenv psutil psycopg2-binary httpx pypdf markdown-it-py
 
+No Node.js or npm required — UI is pure HTML/JS served directly by FastAPI.
+
 Configuration: edit the ENV DEFAULTS section below, or set environment variables,
 or create an 'env' file alongside this script (same key=value format).
 """
@@ -693,9 +695,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-_DIST = _HERE / "frontend" / "dist"  # Vite build output
-
-
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     logger.info("=" * 60)
@@ -863,21 +862,21 @@ async def doc_stats():
     return {"stats": get_doc_stats()}
 
 
-# ── Serve built frontend (if dist/ exists) ────────────────────────────────
-if _DIST.exists():
-    app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="assets")
+# ── Serve HTML UI + static assets (no Node.js / npm needed) ─────────────
+# index.html lives alongside app.py
+# Static assets (logos) are served from ./static/
+_INDEX  = _HERE / "index.html"
+_STATIC = _HERE / "static"
 
-    @app.get("/{full_path:path}")
-    async def spa_fallback(full_path: str):
-        """Serve index.html for all non-API routes (SPA routing)."""
-        file = _DIST / full_path
-        if file.exists() and file.is_file():
-            return FileResponse(str(file))
-        return FileResponse(str(_DIST / "index.html"))
-else:
-    @app.get("/")
-    async def no_frontend():
-        return {"message": "Frontend not built. Run: cd frontend && npm install && npm run build"}
+if _STATIC.exists():
+    app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
+
+@app.get("/", response_class=FileResponse)
+async def serve_ui():
+    """Serve the single-file HTML UI."""
+    if _INDEX.exists():
+        return FileResponse(str(_INDEX), media_type="text/html")
+    return {"error": "index.html not found alongside app.py"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

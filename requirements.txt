@@ -1,5 +1,6 @@
 # Cloudera ECS AI Ops — Python dependencies
 # Install: pip install -r requirements.txt
+# No Node.js or npm required.
 
 # Web framework
 fastapi>=0.111
@@ -13,7 +14,7 @@ langgraph>=0.1
 # Kubernetes
 kubernetes>=29.0
 
-# RAG / Vector DB
+# RAG / Vector DB (Phase 2)
 psycopg2-binary>=2.9
 httpx>=0.27
 
@@ -28,4 +29,4 @@ psutil>=5.9
 python-dotenv>=1.0
 
 # GPU monitoring (optional — install only if NVIDIA GPU present)
-# nvidia-ml-py>=12.0   # pynvml — auto-detects GPU count and metrics
+# pip install nvidia-ml-py
