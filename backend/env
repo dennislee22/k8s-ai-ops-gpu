@@ -1,0 +1,62 @@
+# ── Ollama (local — no API key needed, no internet required) ─────────────
+OLLAMA_BASE_URL=http://localhost:11434
+
+# ── LLM Model (CPU Inference) ─────────────────────────────────────────────
+# Recommended for CPU: qwen2.5:7b (best reasoning + tool calling at 7B)
+# Fallback if too slow:  llama3.2:3b (faster, ~15-20 tok/s on CPU)
+# Better hardware (32+ cores, 64GB RAM): qwen2.5:14b
+#
+# Pull before air-gapping:
+#   ollama pull qwen2.5:7b
+#   ollama pull nomic-embed-text
+LLM_MODEL=qwen2.5:7b
+EMBED_MODEL=nomic-embed-text
+
+# ── CPU Tuning ────────────────────────────────────────────────────────────
+# Set NUM_THREAD to your physical core count (not hyperthreaded).
+# This is the single most impactful CPU performance setting.
+# Examples: 8-core i7 → 8, 16-core server → 16, 32-core server → 32
+NUM_THREAD=16
+
+# Context window — reduce to save RAM and speed up inference on CPU.
+# 4096 is sufficient for K8s log analysis. Increase to 8192 if logs are long.
+NUM_CTX=4096
+
+# Explicitly disable GPU (set to 0 for CPU-only inference)
+NUM_GPU=0
+
+# ── PostgreSQL + pgvector ─────────────────────────────────────────────────
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=k8sops
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+
+# ── Kubernetes ────────────────────────────────────────────────────────────
+# Leave blank to use in-cluster config (when running inside K8s pod)
+# Set to kubeconfig path when running outside the cluster
+KUBECONFIG_PATH=~/.kube/config
+K8S_NAMESPACE=default
+
+# ── Phase toggle ──────────────────────────────────────────────────────────
+# PHASE=1 → K8s health checks only (no RAG, no document retrieval)
+# PHASE=2 → K8s + RAG (known issues + runbooks cross-referenced)
+PHASE=2
+
+# ── CPU Model Selection Guide ─────────────────────────────────────────────
+# Hardware          | Recommended Model     | Expected Speed
+# ----------------  | --------------------  | --------------
+# 8-core  / 16GB   | llama3.2:3b           | ~10-15 tok/s
+# 16-core / 32GB   | qwen2.5:7b  ← default | ~6-10 tok/s
+# 32-core / 64GB   | qwen2.5:14b           | ~3-5  tok/s
+# 64-core / 128GB  | qwen2.5:32b           | ~1-2  tok/s
+-e 
+# ── Logging ──────────────────────────────────────────────────────────────
+# DEBUG | INFO | WARNING | ERROR
+LOG_LEVEL=INFO
+
+# ── Custom system prompt rules ────────────────────────────────────────────
+# Add site-specific instructions here. These are injected into every LLM
+# call. Separate multiple rules with newlines using \n or a multi-line value.
+# Example: Do not recommend cgroupv2 migration.
+CUSTOM_RULES=- Do NOT recommend migrating to cgroupv2. This environment runs cgroupv1 and migration is not supported.
