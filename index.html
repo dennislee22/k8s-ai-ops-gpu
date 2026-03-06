@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<!-- Disable Cloudflare email obfuscation for this app -->
+<meta name="cf-2fa-verify" content="no-obfuscate"/>
 <title>ECS AI Ops</title>
 <link rel="icon" type="image/svg+xml" href="/static/k8s-logo.svg"/>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
@@ -87,7 +89,7 @@ button{cursor:pointer;font-family:inherit}
   width:17px;height:17px;border-radius:50%;
   background:var(--headerBg);border:1px solid var(--border);
   display:flex;align-items:center;justify-content:center;
-  cursor:pointer;font-size:11px;color:var(--dimText);
+  cursor:help;font-size:11px;color:var(--dimText);
   font-family:'IBM Plex Mono',monospace;flex-shrink:0;user-select:none;
 }
 #tt-box{
@@ -96,7 +98,7 @@ button{cursor:pointer;font-family:inherit}
   border-radius:10px;padding:14px 16px;width:285px;
   font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;color:var(--tooltipText);
   line-height:1.7;box-shadow:0 8px 32px #0009;
-  opacity:0;pointer-events:none;transition:opacity .15s;
+  opacity:0;pointer-events:none;transition:opacity .12s;
 }
 #tt-box.open{opacity:1;pointer-events:auto}
 #tt-box .tt-row{margin-bottom:5px}
@@ -288,7 +290,7 @@ button{cursor:pointer;font-family:inherit}
       </div>
     </div>
     <div id="hdr-right">
-      <a id="email-link" href="mailto:dennislee@cloudera.com">&#9993; dennislee@cloudera.com</a>
+      <a id="email-link" href="mailto:dennislee&#64;cloudera.com">&#9993; dennislee&#64;cloudera.com</a>
       <div id="theme-row">
         <span id="theme-label">THEME</span>
         <button class="tdot active" data-theme="midnight"
@@ -383,7 +385,7 @@ button{cursor:pointer;font-family:inherit}
         <!-- Inference footer -->
         <div class="pf">
           <span class="ph-title">INFERENCE</span>
-          <div class="infer-badge" id="infer-badge-cpu">
+          <div class="infer-badge">
             <div class="infer-dot" id="infer-dot-cpu" style="background:#64748b"></div>
             <span id="infer-txt-cpu" style="color:var(--panelDim)">loading&hellip;</span>
           </div>
@@ -391,7 +393,7 @@ button{cursor:pointer;font-family:inherit}
       </div>
 
       <!-- ── GPU Panel (shown only when GPUs present) ───────────────────── -->
-      <div class="panel" id="gpu-panel" style="display:none">
+      <div class="panel" id="gpu-panel" style="display:none;flex-direction:column">
         <div class="ph">
           <span class="ph-title">GPU MONITOR</span>
           <span class="ph-sub" id="gpu-count-lbl"></span>
@@ -399,9 +401,9 @@ button{cursor:pointer;font-family:inherit}
         <div class="gpu-cards-wrap" id="gpu-cards"></div>
         <div class="pf">
           <span class="ph-title">INFERENCE</span>
-          <div class="infer-badge" id="infer-badge-gpu">
+          <div class="infer-badge">
             <div class="infer-dot" style="background:#22c55e;box-shadow:0 0 6px #22c55e88"></div>
-            <span style="color:#22c55e">GPU Active</span>
+            <span style="color:#22c55e">&#9889; GPU</span>
           </div>
         </div>
       </div>
@@ -410,7 +412,7 @@ button{cursor:pointer;font-family:inherit}
   </div><!-- #body -->
 </div><!-- #app -->
 
-<script>
+<script data-cfasync="false">
 (function(){
 'use strict';
 
@@ -444,16 +446,16 @@ const THEMES = {
     '--shimmer':'linear-gradient(90deg,#EF3340 0%,#ff6b74 40%,#EF3340 80%)',
   },
   cloudera:{
-    // #F96702 on light grey background
+    // #F96702 on darker grey background
     name:'Cloudera', shimmer:false, solidTitle:'#F96702',
-    '--bg':'#f3f4f6','--headerBg':'#f9fafb','--border':'#e5c9b0',
+    '--bg':'#d1d5db','--headerBg':'#e5e7eb','--border':'#c9a882',
     '--accent':'#F96702','--accent2':'#c45202',
-    '--msgBg':'#ffffff','--inputBg':'#f9fafb',
-    '--userBg':'#fef3e7','--userBorder':'#fdd0aa',
-    '--statusBg':'#fef9f5','--dimText':'#7c4a1e','--bodyText':'#2d1200',
-    '--tooltipBg':'#ffffff','--tooltipText':'#2d1200',
-    '--panelBg':'#f9fafb','--panelBorder':'#e5c9b0','--panelLabel':'#F96702','--panelDim':'#7c4a1e',
-    '--textMain':'#1c0a00','--inputText':'#1c0a00',
+    '--msgBg':'#e5e7eb','--inputBg':'#d1d5db',
+    '--userBg':'#fce8d2','--userBorder':'#f5b87a',
+    '--statusBg':'#e5e7eb','--dimText':'#6b3a10','--bodyText':'#1a0800',
+    '--tooltipBg':'#e5e7eb','--tooltipText':'#1a0800',
+    '--panelBg':'#c4c8cf','--panelBorder':'#c9a882','--panelLabel':'#F96702','--panelDim':'#6b3a10',
+    '--textMain':'#1a0800','--inputText':'#1a0800',
     '--shimmer':'linear-gradient(90deg,#F96702 0%,#ea580c 30%,#fb923c 60%,#F96702 100%)',
   },
 };
@@ -484,11 +486,10 @@ document.querySelectorAll('.tdot').forEach(btn=>{
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TOOLTIP — click to open/close, click outside to close
+// TOOLTIP — hover to show, positioned below the ? button
 // ═══════════════════════════════════════════════════════════════════════════
 const ttBtn = document.getElementById('tt-btn');
 const ttBox = document.getElementById('tt-box');
-let ttOpen  = false;
 
 function posTooltip(){
   const r = ttBtn.getBoundingClientRect();
@@ -497,15 +498,18 @@ function posTooltip(){
   ttBox.style.left = Math.max(8, left) + 'px';
 }
 
-ttBtn.onclick = function(e){
-  e.stopPropagation();
-  ttOpen = !ttOpen;
-  if(ttOpen) posTooltip();
-  ttBox.classList.toggle('open', ttOpen);
-};
-document.addEventListener('click', function(e){
-  if(ttOpen && !ttBox.contains(e.target)){
-    ttOpen = false;
+ttBtn.addEventListener('mouseenter', function(){
+  posTooltip();
+  ttBox.classList.add('open');
+});
+ttBtn.addEventListener('mouseleave', function(e){
+  // keep open if mouse moved onto the box itself
+  if(!ttBox.contains(e.relatedTarget)){
+    ttBox.classList.remove('open');
+  }
+});
+ttBox.addEventListener('mouseleave', function(e){
+  if(e.relatedTarget !== ttBtn){
     ttBox.classList.remove('open');
   }
 });
@@ -544,12 +548,12 @@ function updateInferenceBadge(){
   if(isGpu){
     dot.style.background  = '#22c55e';
     dot.style.boxShadow   = '0 0 6px #22c55e88';
-    txt.textContent       = '\u26A1 GPU (' + modelName + ')';
+    txt.textContent       = '\u26A1 GPU';
     txt.style.color       = '#22c55e';
   } else {
     dot.style.background  = '#f59e0b';
     dot.style.boxShadow   = '0 0 6px #f59e0b88';
-    txt.textContent       = '\u2699\uFE0F CPU (' + modelName + ')';
+    txt.textContent       = '\u2699\uFE0F CPU';
     txt.style.color       = '#f59e0b';
   }
 }
@@ -875,7 +879,8 @@ async function pollMetrics(){
     // GPUs
     const gpus = d.gpus||[];
     if(gpus.length > 0){
-      gpuPanel.style.display = 'flex';
+      gpuPanel.style.display       = 'flex';
+      gpuPanel.style.flexDirection = 'column';
       gpuCntEl.textContent   = gpus.length+' device'+(gpus.length>1?'s':'');
       renderGpus(gpuCardsEl, gpus);
     } else {
@@ -890,7 +895,7 @@ setInterval(pollMetrics, 1500);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // INIT
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════
 applyTheme('midnight');
 
 })();
