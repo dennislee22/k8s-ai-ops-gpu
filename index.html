@@ -9,89 +9,91 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
-body{font-family:'IBM Plex Sans',sans-serif;transition:background .3s,color .3s}
+body{font-family:'IBM Plex Sans',sans-serif}
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
 textarea:focus{outline:none}
-button{cursor:pointer}
+button{cursor:pointer;font-family:inherit}
 
-/* Theme CSS variables */
 :root{
   --bg:#030712;--headerBg:#070d1a;--border:#0f1f35;
   --accent:#38bdf8;--accent2:#7dd3fc;
   --msgBg:#070d1a;--inputBg:#0a0f1e;
   --userBg:#0f172a;--userBorder:#1e293b;
   --statusBg:#040b14;--dimText:#475569;--bodyText:#cbd5e1;
-  --tooltipBg:#070d1a;--tooltipText:#94a3b8;
+  --tooltipBg:#0a1628;--tooltipText:#94a3b8;
   --cpuBg:#020a14;--cpuBorder:#0f1f35;--cpuLabel:#7dd3fc;
   --textMain:#e2e8f0;--inputText:#e2e8f0;
-  --titleColor:transparent;/* transparent = use shimmer */
   --shimmer:linear-gradient(90deg,#38bdf8 0%,#818cf8 25%,#c084fc 50%,#38bdf8 75%,#00C1DE 100%);
 }
 
 @keyframes pls{0%,100%{opacity:1}50%{opacity:.2}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @keyframes shimmer{0%{background-position:-500px 0}100%{background-position:500px 0}}
-@keyframes spin{to{transform:rotate(360deg)}}
 @keyframes dotPulse{0%,80%,100%{opacity:.2}40%{opacity:1}}
 
 .shiny{
-  background:var(--shimmer);
-  background-size:500px 100%;
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
-  background-clip:text;
-  animation:shimmer 4s linear infinite;
+  background:var(--shimmer);background-size:500px 100%;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;animation:shimmer 4s linear infinite;
 }
-.shiny-solid{color:var(--titleColor) !important;-webkit-text-fill-color:var(--titleColor) !important}
+.shiny-solid{-webkit-text-fill-color:unset !important;background:none !important;
+  animation:none !important;color:var(--titleSolid,#f96702) !important}
 .fade-up{animation:fadeUp .25s ease}
 
 /* Layout */
 #app{height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--textMain)}
-#header{
+#hdr{
   padding:10px 24px;border-bottom:1px solid var(--border);
   background:var(--headerBg);display:flex;align-items:center;gap:14px;flex-shrink:0;
+  position:relative;z-index:100;
 }
 #logos{display:flex;align-items:center;gap:8px;flex-shrink:0}
 #logos img{object-fit:contain;display:block}
 #title-block{display:flex;flex-direction:column;gap:2px}
 #title{font-size:20px;font-weight:700;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em;line-height:1}
 #subtitle{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;display:flex;align-items:center;gap:6px}
-#header-right{margin-left:auto;display:flex;align-items:center;gap:16px}
+#hdr-right{margin-left:auto;display:flex;align-items:center;gap:16px}
 #email-link{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;text-decoration:none;transition:color .2s}
 #email-link:hover{color:var(--accent2)}
 #theme-row{display:flex;align-items:center;gap:6px}
 #theme-label{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace}
-#theme-dots{display:flex;gap:6px;align-items:center}
-.theme-dot{width:18px;height:18px;border-radius:50%;border:none;cursor:pointer;padding:0;transition:outline .2s}
-#theme-name{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;margin-left:2px}
+.tdot{
+  width:18px;height:18px;border-radius:50%;border:2px solid transparent;
+  cursor:pointer;padding:0;transition:border-color .2s,transform .15s;flex-shrink:0;
+}
+.tdot:hover{transform:scale(1.2)}
+.tdot.active{border-color:var(--accent) !important}
+#theme-name{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;margin-left:2px;min-width:52px}
 #ready-row{display:flex;align-items:center;gap:7px}
-#ready-dot{width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;flex-shrink:0}
+#ready-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e88;flex-shrink:0}
 #ready-text{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace}
-/* Tooltip */
-#tooltip-wrap{position:relative;display:inline-flex;align-items:center}
-#tooltip-btn{
+
+/* Tooltip — JS-driven, not CSS hover (avoids z-index / Cloudflare issues) */
+#tt-wrap{position:relative;display:inline-flex;align-items:center}
+#tt-btn{
   width:17px;height:17px;border-radius:50%;background:var(--headerBg);
   border:1px solid var(--border);display:flex;align-items:center;justify-content:center;
-  cursor:help;font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;flex-shrink:0;
+  cursor:help;font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;
+  flex-shrink:0;user-select:none;
 }
-#tooltip-box{
-  display:none;position:absolute;top:24px;right:0;z-index:200;
+#tt-box{
+  position:fixed;z-index:9999;
   background:var(--tooltipBg);border:1px solid var(--border);
-  border-radius:10px;padding:12px 14px;width:270px;
-  font-family:'IBM Plex Sans',sans-serif;font-size:12px;color:var(--tooltipText);line-height:1.65;
-  box-shadow:0 8px 32px #0006;
+  border-radius:10px;padding:14px 16px;width:280px;
+  font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;color:var(--tooltipText);
+  line-height:1.7;box-shadow:0 8px 32px #0008;pointer-events:none;
+  opacity:0;transition:opacity .15s;
 }
-#tooltip-wrap:hover #tooltip-box{display:block}
+#tt-box.visible{opacity:1}
 
-/* Body = chat + panels */
+/* Body */
 #body{flex:1;display:flex;overflow:hidden}
-#chat-col{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#chat-col{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 #messages{flex:1;overflow:auto;padding:20px 24px}
-#examples{margin-top:8px}
 #examples-label{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;margin-bottom:10px;letter-spacing:.1em}
-#examples-btns{display:flex;flex-wrap:wrap;gap:7px}
+#examples-btns{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
 .ex-btn{
   background:var(--headerBg);border:1px solid var(--border);
   border-radius:8px;padding:7px 12px;font-size:12px;
@@ -99,20 +101,19 @@ button{cursor:pointer}
 }
 .ex-btn:hover{border-color:var(--accent);color:var(--accent2)}
 
-/* Input */
+/* Input bar */
 #input-bar{border-top:1px solid var(--border);padding:14px 24px;background:var(--headerBg);display:flex;gap:10px}
 #chat-input{
   flex:1;background:var(--inputBg);border:1px solid var(--border);
   border-radius:10px;padding:10px 14px;color:var(--inputText);
-  font-size:14px;font-family:'IBM Plex Sans',sans-serif;resize:none;
-  transition:border-color .2s;line-height:1.5;
+  font-size:14px;resize:none;transition:border-color .2s;line-height:1.5;
 }
-#chat-input:focus{border-color:var(--accent)88}
+#chat-input:focus{border-color:var(--accent)}
 #send-btn{
   background:var(--msgBg);border:1px solid var(--accent);border-radius:10px;
   padding:10px 18px;color:var(--accent2);font-size:13px;
   font-family:'IBM Plex Mono',monospace;font-weight:700;
-  transition:all .2s;align-self:stretch;
+  transition:all .2s;align-self:stretch;min-width:80px;
 }
 #send-btn:disabled{background:var(--headerBg);border-color:var(--border);color:var(--dimText);cursor:not-allowed}
 
@@ -129,11 +130,11 @@ button{cursor:pointer}
   border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;
   flex-shrink:0;margin-top:2px;
 }
-.msg-ai-body{flex:1}
+.msg-ai-body{flex:1;min-width:0}
 .msg-ai-bubble{
   background:var(--msgBg);border:1px solid var(--border);
   border-radius:2px 14px 14px 14px;padding:14px 18px;
-  font-size:14px;color:var(--bodyText);line-height:1.75;white-space:pre-wrap;
+  font-size:14px;color:var(--bodyText);line-height:1.75;white-space:pre-wrap;word-break:break-word;
 }
 .msg-elapsed{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;margin-top:5px}
 .msg-tools{margin-top:6px;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
@@ -144,8 +145,6 @@ button{cursor:pointer}
   font-family:'IBM Plex Mono',monospace;font-weight:700;
 }
 .tools-meta{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace}
-
-/* Status ticker */
 .status-box{
   background:var(--statusBg);border:1px solid var(--border);
   border-radius:12px;padding:12px 16px;margin-bottom:4px;
@@ -155,86 +154,82 @@ button{cursor:pointer}
 .status-label{color:var(--dimText);font-size:10px;letter-spacing:.12em;margin-bottom:2px}
 .status-line{display:flex;align-items:center;gap:8px;color:var(--dimText)}
 .status-line.active{color:var(--accent2)}
-.status-dots{display:flex;gap:4px;margin-top:2px}
-.status-dot-pulse{width:4px;height:4px;border-radius:50%;background:var(--dimText);animation:dotPulse 1.2s infinite}
+.sdots{display:flex;gap:4px;margin-top:2px}
+.sdot{width:4px;height:4px;border-radius:50%;background:var(--dimText);animation:dotPulse 1.2s infinite}
 
-/* Right panels */
+/* Side panels */
 #panels{display:flex;flex-shrink:0}
 .side-panel{
   width:290px;flex-shrink:0;background:var(--cpuBg);border-left:1px solid var(--cpuBorder);
   display:flex;flex-direction:column;font-family:'IBM Plex Mono',monospace;font-size:11px;overflow:hidden;
 }
-.panel-hdr{
+.phdr{
   padding:8px 12px 6px;border-bottom:1px solid var(--cpuBorder);
-  display:flex;justify-content:space-between;align-items:center;
+  display:flex;justify-content:space-between;align-items:center;flex-shrink:0;
 }
-.panel-hdr-title{color:var(--cpuLabel);font-weight:700;font-size:13px}
-.panel-hdr-sub{color:var(--dimText);font-size:11px}
-.panel-section{padding:8px 12px 4px}
-.panel-footer{
+.phdr-title{color:var(--cpuLabel);font-weight:700;font-size:13px}
+.phdr-sub{color:var(--dimText);font-size:11px}
+.pfooter{
   padding:6px 12px 8px;border-top:1px solid var(--cpuBorder);
-  display:flex;justify-content:space-between;align-items:center;
+  display:flex;justify-content:space-between;align-items:center;flex-shrink:0;
 }
-
 /* Sparkline */
 #spark-wrap{
   background:var(--headerBg);border:1px solid var(--cpuBorder);
   border-radius:4px;margin-bottom:6px;overflow:hidden;position:relative;
 }
-#spark-label{position:absolute;top:3px;right:5px;font-size:10px;color:var(--dimText)}
-#sparkline{display:block}
-
-/* Core bars */
+#spark-lbl{position:absolute;top:3px;right:5px;font-size:10px;color:var(--dimText)}
+/* Core grid */
 #cores-grid{flex:1;overflow-y:auto;padding:0 12px;display:flex;gap:10px}
 .core-col{flex:1;display:flex;flex-direction:column;gap:3px}
 .core-row{display:flex;align-items:center;gap:4px}
 .core-lbl{color:var(--dimText);min-width:22px;font-size:10px}
 .core-track{flex:1;position:relative;height:8px}
-.core-track-bg{position:absolute;inset:0;background:var(--cpuBorder)33;border-radius:2px}
-.core-track-fill{position:absolute;top:0;left:0;bottom:0;border-radius:2px;transition:width .8s ease}
-.core-track-dots{
+.core-bg{position:absolute;inset:0;background:var(--cpuBorder)33;border-radius:2px}
+.core-fill{position:absolute;top:0;left:0;bottom:0;border-radius:2px;transition:width .8s ease}
+.core-dots{
   position:absolute;inset:0;border-radius:2px;
   background-image:repeating-linear-gradient(90deg,transparent,transparent 4px,var(--cpuBg)66 4px,var(--cpuBg)66 5px);
 }
 .core-pct{min-width:30px;text-align:right;font-size:10px;color:var(--dimText)}
-.core-pct.hot{font-weight:700}
-
 /* RAM */
-.ram-section{padding:8px 12px 6px;border-top:1px solid var(--cpuBorder)}
+.ram-section{padding:8px 12px 6px;border-top:1px solid var(--cpuBorder);flex-shrink:0}
 .ram-title{color:var(--cpuLabel);font-weight:700;font-size:13px;margin-bottom:6px}
-.ram-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.ram-row{display:flex;align-items:center;gap:6px}
 .ram-lbl{color:var(--cpuLabel);font-size:13px}
-.ram-track{flex:1;height:8px;background:var(--cpuBorder)33;border-radius:2px;position:relative}
+.ram-track{flex:1;height:8px;background:var(--cpuBorder)33;border-radius:2px;position:relative;overflow:hidden}
 .ram-fill{position:absolute;top:0;left:0;bottom:0;border-radius:2px;transition:width 1s ease}
-.ram-val{color:var(--dimText);font-size:10px;min-width:72px;text-align:right}
-
-/* GPU card */
+.ram-val{color:var(--dimText);font-size:10px;min-width:78px;text-align:right}
+/* GPU */
 .gpu-card{
   background:var(--headerBg);border:1px solid var(--cpuBorder);
   border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;
 }
-.gpu-card-hdr{display:flex;justify-content:space-between;align-items:center}
+.gpu-chdr{display:flex;justify-content:space-between;align-items:center}
 .gpu-idx{color:var(--cpuLabel);font-weight:700;font-size:12px}
 .gpu-name{color:var(--dimText);font-size:10px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gpu-bar-row{display:flex;justify-content:space-between;margin-bottom:3px}
-.gpu-bar-lbl{color:var(--dimText);font-size:11px}
-.gpu-bar-val{font-weight:700;font-size:12px}
-.gpu-track{height:10px;background:var(--cpuBorder)33;border-radius:3px;position:relative}
+.bar-row{display:flex;justify-content:space-between;margin-bottom:3px}
+.bar-lbl{color:var(--dimText);font-size:11px}
+.bar-val{font-weight:700;font-size:12px}
+.gpu-track{height:10px;background:var(--cpuBorder)33;border-radius:3px;position:relative;overflow:hidden}
 .gpu-fill{position:absolute;top:0;left:0;bottom:0;border-radius:3px;transition:width 1s ease}
 .gpu-stripe{
-  position:absolute;inset:0;border-radius:3px;
+  position:absolute;inset:0;
   background-image:repeating-linear-gradient(90deg,transparent,transparent 4px,var(--cpuBg)55 4px,var(--cpuBg)55 5px);
 }
-.gpu-vram-track{height:8px;background:var(--cpuBorder)33;border-radius:3px;position:relative}
-.gpu-vram-fill{position:absolute;top:0;left:0;bottom:0;border-radius:3px;transition:width 1s ease}
+.vram-track{height:8px;background:var(--cpuBorder)33;border-radius:3px;position:relative;overflow:hidden}
+.vram-fill{position:absolute;top:0;left:0;bottom:0;border-radius:3px;transition:width 1s ease}
 .gpu-meta{display:flex;gap:12px;margin-top:2px;font-size:12px}
+
+/* CPU spark section */
+#cpu-spark-section{padding:8px 12px 4px;flex-shrink:0}
+#cpu-bar-row{display:flex;align-items:center;gap:6px;margin-bottom:8px}
 </style>
 </head>
 <body>
 <div id="app">
 
-  <!-- HEADER -->
-  <div id="header">
+  <div id="hdr">
     <div id="logos">
       <img src="/static/rancher-logo.svg" alt="Rancher" width="38" height="38"/>
       <img src="/static/k8s-logo.svg"     alt="Kubernetes" width="34" height="34"/>
@@ -243,28 +238,22 @@ button{cursor:pointer}
       <div id="title" class="shiny">Cloudera ECS AI Ops</div>
       <div id="subtitle">
         <span id="subtitle-text">Air-gapped · loading...</span>
-        <div id="tooltip-wrap">
-          <div id="tooltip-btn">?</div>
-          <div id="tooltip-box">
-            <div id="tt-mode" style="font-weight:600;margin-bottom:6px"></div>
-            <div>Model: <span id="tt-model" style="color:var(--bodyText)"></span></div>
-            <div id="tt-note" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px"></div>
-          </div>
+        <div id="tt-wrap">
+          <div id="tt-btn" title="Model info">?</div>
         </div>
       </div>
     </div>
-    <div id="header-right">
-      <a id="email-link" href="/cdn-cgi/l/email-protection#f195949f9f98829d9494b1929d9e8495948390df929e9c">✉ <span class="__cf_email__" data-cfemail="0460616a6a6d776861614467686b71606176652a676b69">[email&#160;protected]</span></a>
+    <div id="hdr-right">
+      <!-- Plain text email, no obfuscation -->
+      <a id="email-link" href="mailto:dennislee@cloudera.com">&#9993; dennislee@cloudera.com</a>
       <div id="theme-row">
         <span id="theme-label">THEME</span>
-        <div id="theme-dots">
-          <button class="theme-dot" data-theme="midnight"
-            style="background:linear-gradient(135deg,#38bdf8,#818cf8)" title="Midnight"></button>
-          <button class="theme-dot" data-theme="singapore"
-            style="background:linear-gradient(135deg,#ef4444,#991b1b)" title="Singapore"></button>
-          <button class="theme-dot" data-theme="cloudera"
-            style="background:linear-gradient(135deg,#f96702,#fdd0aa)" title="Cloudera"></button>
-        </div>
+        <button class="tdot" id="dot-midnight" data-theme="midnight"
+          style="background:linear-gradient(135deg,#38bdf8,#818cf8)" title="Midnight"></button>
+        <button class="tdot" id="dot-singapore" data-theme="singapore"
+          style="background:linear-gradient(135deg,#ef4444,#991b1b)" title="Singapore"></button>
+        <button class="tdot" id="dot-cloudera" data-theme="cloudera"
+          style="background:linear-gradient(135deg,#f96702,#fdd0aa)" title="Cloudera"></button>
         <span id="theme-name">Midnight</span>
       </div>
       <div id="ready-row">
@@ -274,7 +263,15 @@ button{cursor:pointer}
     </div>
   </div>
 
-  <!-- BODY -->
+  <!-- Tooltip box — positioned by JS, outside header flow -->
+  <div id="tt-box">
+    <div id="tt-mode" style="font-weight:700;margin-bottom:8px;font-size:13px"></div>
+    <div style="margin-bottom:4px">Model: <span id="tt-model" style="color:var(--bodyText)"></span></div>
+    <div id="tt-embed" style="margin-bottom:4px"></div>
+    <div id="tt-chroma" style="margin-bottom:4px"></div>
+    <div id="tt-note" style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;font-size:12px"></div>
+  </div>
+
   <div id="body">
     <div id="chat-col">
       <div id="messages">
@@ -285,490 +282,490 @@ button{cursor:pointer}
       </div>
       <div id="input-bar">
         <textarea id="chat-input" rows="2"
-          placeholder="Ask about cluster health, Longhorn storage, pod issues, logs, events... (Enter to send)"></textarea>
-        <button id="send-btn">→ Send</button>
+          placeholder="Ask about cluster health, Longhorn storage, pod issues, logs, events… (Enter to send)"></textarea>
+        <button id="send-btn">&#8594; Send</button>
       </div>
     </div>
 
-    <!-- RIGHT PANELS -->
     <div id="panels">
       <!-- CPU Panel -->
       <div class="side-panel" id="cpu-panel">
-        <div class="panel-hdr">
-          <span class="panel-hdr-title">CPU MONITOR</span>
-          <span class="panel-hdr-sub" id="cpu-freq-lbl">— GHz</span>
+        <div class="phdr">
+          <span class="phdr-title">CPU MONITOR</span>
+          <span class="phdr-sub" id="cpu-freq-lbl">&#8212; GHz</span>
         </div>
-        <div class="panel-section">
+        <div id="cpu-spark-section">
           <div id="spark-wrap">
-            <svg id="sparkline" width="266" height="28"></svg>
-            <span id="spark-label">60s</span>
+            <svg id="sparkline" width="266" height="28" style="display:block"></svg>
+            <span id="spark-lbl">60s</span>
           </div>
-          <!-- Overall CPU dotbar -->
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+          <div id="cpu-bar-row">
             <span style="color:var(--cpuLabel);min-width:28px;font-size:12px">CPU</span>
-            <div id="cpu-dotbar" style="flex:1;display:flex;gap:1px;align-items:center"></div>
-            <span id="cpu-total-pct" style="min-width:36px;text-align:right;font-weight:700;font-size:13px"></span>
+            <div id="cpu-dotbar" style="flex:1;display:flex;gap:1px;align-items:center;overflow:hidden"></div>
+            <span id="cpu-total-pct" style="min-width:38px;text-align:right;font-weight:700;font-size:13px;color:var(--cpuLabel)"></span>
           </div>
         </div>
-        <div id="cores-grid" class="cores-grid"></div>
+        <div id="cores-grid"></div>
         <div class="ram-section">
           <div class="ram-title">RAM MONITOR</div>
           <div class="ram-row">
             <span class="ram-lbl">RAM</span>
             <div class="ram-track"><div id="ram-fill" class="ram-fill"></div></div>
-            <span id="ram-val" class="ram-val"></span>
+            <span id="ram-val" class="ram-val">&#8212;</span>
           </div>
         </div>
-        <div class="panel-footer">
-          <span class="panel-hdr-title">LOAD AVG</span>
-          <span id="load-avg" style="color:var(--dimText);font-size:13px;letter-spacing:.05em"></span>
+        <div class="pfooter">
+          <span class="phdr-title">LOAD AVG</span>
+          <span id="load-avg" style="color:var(--dimText);font-size:13px;letter-spacing:.05em">&#8212;</span>
         </div>
       </div>
 
-      <!-- GPU Panel (hidden until GPUs detected) -->
+      <!-- GPU Panel -->
       <div class="side-panel" id="gpu-panel" style="display:none">
-        <div class="panel-hdr">
-          <span class="panel-hdr-title">GPU MONITOR</span>
-          <span class="panel-hdr-sub" id="gpu-count-lbl"></span>
+        <div class="phdr">
+          <span class="phdr-title">GPU MONITOR</span>
+          <span class="phdr-sub" id="gpu-count-lbl"></span>
         </div>
         <div id="gpu-cards" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:14px"></div>
-        <div class="panel-footer">
-          <span class="panel-hdr-title">INFERENCE</span>
-          <span style="color:#22c55e;font-size:12px">⚡ GPU Active</span>
+        <div class="pfooter">
+          <span class="phdr-title">INFERENCE</span>
+          <span style="color:#22c55e;font-size:12px">&#9889; GPU Active</span>
         </div>
       </div>
-    </div><!-- #panels -->
-  </div><!-- #body -->
-</div><!-- #app -->
+    </div>
+  </div>
+</div>
 
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
-// ─────────────────────────────────────────────────────────────────────────────
-// THEMES
-// ─────────────────────────────────────────────────────────────────────────────
+<script>
+(function(){
+'use strict';
+
+// ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES = {
-  midnight: {
-    name:"Midnight", dark:true,
-    "--bg":"#030712","--headerBg":"#070d1a","--border":"#0f1f35",
-    "--accent":"#38bdf8","--accent2":"#7dd3fc",
-    "--msgBg":"#070d1a","--inputBg":"#0a0f1e",
-    "--userBg":"#0f172a","--userBorder":"#1e293b",
-    "--statusBg":"#040b14","--dimText":"#475569","--bodyText":"#cbd5e1",
-    "--tooltipBg":"#070d1a","--tooltipText":"#94a3b8",
-    "--cpuBg":"#020a14","--cpuBorder":"#0f1f35","--cpuLabel":"#7dd3fc",
-    "--textMain":"#e2e8f0","--inputText":"#e2e8f0","--titleColor":"transparent",
-    "--shimmer":"linear-gradient(90deg,#38bdf8 0%,#818cf8 25%,#c084fc 50%,#38bdf8 75%,#00C1DE 100%)",
+  midnight:{
+    name:'Midnight',solid:false,
+    '--bg':'#030712','--headerBg':'#070d1a','--border':'#0f1f35',
+    '--accent':'#38bdf8','--accent2':'#7dd3fc',
+    '--msgBg':'#070d1a','--inputBg':'#0a0f1e',
+    '--userBg':'#0f172a','--userBorder':'#1e293b',
+    '--statusBg':'#040b14','--dimText':'#475569','--bodyText':'#cbd5e1',
+    '--tooltipBg':'#0a1628','--tooltipText':'#94a3b8',
+    '--cpuBg':'#020a14','--cpuBorder':'#0f1f35','--cpuLabel':'#7dd3fc',
+    '--textMain':'#e2e8f0','--inputText':'#e2e8f0',
+    '--shimmer':'linear-gradient(90deg,#38bdf8 0%,#818cf8 25%,#c084fc 50%,#38bdf8 75%,#00C1DE 100%)',
   },
-  singapore: {
-    name:"Singapore", dark:true,
-    "--bg":"#0d0000","--headerBg":"#1a0000","--border":"#4a0000",
-    "--accent":"#c41e1e","--accent2":"#ffffff",
-    "--msgBg":"#1a0000","--inputBg":"#110000",
-    "--userBg":"#220000","--userBorder":"#4a0000",
-    "--statusBg":"#0d0000","--dimText":"#e5e5e5","--bodyText":"#ffffff",
-    "--tooltipBg":"#1a0000","--tooltipText":"#ffffff",
-    "--cpuBg":"#0d0000","--cpuBorder":"#4a0000","--cpuLabel":"#ffffff",
-    "--textMain":"#ffffff","--inputText":"#ffffff","--titleColor":"transparent",
-    "--shimmer":"linear-gradient(90deg,#c41e1e 0%,#ef4444 30%,#991b1b 60%,#c41e1e 100%)",
+  singapore:{
+    name:'Singapore',solid:false,
+    '--bg':'#0d0000','--headerBg':'#1a0000','--border':'#4a0000',
+    '--accent':'#c41e1e','--accent2':'#ffffff',
+    '--msgBg':'#1a0000','--inputBg':'#110000',
+    '--userBg':'#220000','--userBorder':'#4a0000',
+    '--statusBg':'#0d0000','--dimText':'#e5e5e5','--bodyText':'#ffffff',
+    '--tooltipBg':'#1a0000','--tooltipText':'#ffffff',
+    '--cpuBg':'#0d0000','--cpuBorder':'#4a0000','--cpuLabel':'#ffffff',
+    '--textMain':'#ffffff','--inputText':'#ffffff',
+    '--shimmer':'linear-gradient(90deg,#c41e1e 0%,#ef4444 30%,#991b1b 60%,#c41e1e 100%)',
   },
-  cloudera: {
-    name:"Cloudera", dark:false,
-    "--bg":"#ffffff","--headerBg":"#ffffff","--border":"#fed7aa",
-    "--accent":"#f96702","--accent2":"#ea580c",
-    "--msgBg":"#fff7ed","--inputBg":"#ffffff",
-    "--userBg":"#ffedd5","--userBorder":"#fed7aa",
-    "--statusBg":"#fff7ed","--dimText":"#9a3412","--bodyText":"#431407",
-    "--tooltipBg":"#ffffff","--tooltipText":"#431407",
-    "--cpuBg":"#ffffff","--cpuBorder":"#fed7aa","--cpuLabel":"#f96702",
-    "--textMain":"#1c0a00","--inputText":"#1c0a00","--titleColor":"#f96702",
-    "--shimmer":"linear-gradient(90deg,#f96702 0%,#ea580c 30%,#fb923c 60%,#f96702 100%)",
+  cloudera:{
+    name:'Cloudera',solid:true,titleSolid:'#f96702',
+    '--bg':'#ffffff','--headerBg':'#ffffff','--border':'#fed7aa',
+    '--accent':'#f96702','--accent2':'#ea580c',
+    '--msgBg':'#fff7ed','--inputBg':'#ffffff',
+    '--userBg':'#ffedd5','--userBorder':'#fed7aa',
+    '--statusBg':'#fff7ed','--dimText':'#9a3412','--bodyText':'#431407',
+    '--tooltipBg':'#ffffff','--tooltipText':'#431407',
+    '--cpuBg':'#ffffff','--cpuBorder':'#fed7aa','--cpuLabel':'#f96702',
+    '--textMain':'#1c0a00','--inputText':'#1c0a00',
+    '--shimmer':'linear-gradient(90deg,#f96702 0%,#ea580c 30%,#fb923c 60%,#f96702 100%)',
   },
 };
 
 let currentTheme = 'midnight';
 
-function applyTheme(name) {
+function applyTheme(name){
   const t = THEMES[name];
+  if(!t) return;
   const root = document.documentElement;
-  for (const [k,v] of Object.entries(t)) {
-    if (k.startsWith('--')) root.style.setProperty(k, v);
+  Object.entries(t).forEach(([k,v])=>{ if(k.startsWith('--')) root.style.setProperty(k,v); });
+  if(t.solid && t.titleSolid){
+    root.style.setProperty('--titleSolid', t.titleSolid);
+    document.getElementById('title').className = 'shiny-solid';
+  } else {
+    document.getElementById('title').className = 'shiny';
   }
   currentTheme = name;
   document.getElementById('theme-name').textContent = t.name;
-  // Title: shimmer or solid colour
-  const title = document.getElementById('title');
-  if (t['--titleColor'] && t['--titleColor'] !== 'transparent') {
-    title.className = 'shiny-solid';
-  } else {
-    title.className = 'shiny';
-  }
-  // Theme dot outlines
-  document.querySelectorAll('.theme-dot').forEach(btn => {
-    const isActive = btn.dataset.theme === name;
-    btn.style.outline = isActive ? `2px solid var(--accent)` : `2px solid var(--border)`;
-    btn.style.outlineOffset = '2px';
+  document.querySelectorAll('.tdot').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.theme === name);
   });
-  // Scrollbar colour update
-  document.querySelector('style').textContent = document.querySelector('style').textContent;
 }
 
-document.querySelectorAll('.theme-dot').forEach(btn => {
-  btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
+// Wire up theme dots — direct onclick avoids any event delegation issues
+document.querySelectorAll('.tdot').forEach(btn=>{
+  btn.onclick = function(){ applyTheme(this.dataset.theme); };
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EXAMPLES
-// ─────────────────────────────────────────────────────────────────────────────
-const EXAMPLES = [
-  "Check overall cluster health",
-  "Are there any warning events in the cluster?",
-  "Why is my payment-service pod crashing?",
-  "Show me node status and resource pressure",
-  "Check all deployments for degraded replicas",
-  "Any OOMKilled pods in the last hour?",
-  "Check Longhorn storage health",
-  "Are there any Longhorn volume issues?",
-];
+// ─── TOOLTIP — JS-driven, fixed positioning ───────────────────────────────────
+const ttBtn  = document.getElementById('tt-btn');
+const ttBox  = document.getElementById('tt-box');
+let   ttOpen = false;
 
+function positionTooltip(){
+  const r = ttBtn.getBoundingClientRect();
+  ttBox.style.top  = (r.bottom + 6) + 'px';
+  // Keep within right edge
+  const left = Math.min(r.left, window.innerWidth - 296);
+  ttBox.style.left = Math.max(4, left) + 'px';
+}
+
+ttBtn.addEventListener('click', function(e){
+  e.stopPropagation();
+  ttOpen = !ttOpen;
+  positionTooltip();
+  ttBox.classList.toggle('visible', ttOpen);
+});
+document.addEventListener('click', function(){
+  if(ttOpen){ ttOpen=false; ttBox.classList.remove('visible'); }
+});
+ttBox.addEventListener('click', function(e){ e.stopPropagation(); });
+
+// ─── EXAMPLES ─────────────────────────────────────────────────────────────────
+const EXAMPLES = [
+  'Check overall cluster health',
+  'Are there any warning events in the cluster?',
+  'Why is my payment-service pod crashing?',
+  'Show me node status and resource pressure',
+  'Check all deployments for degraded replicas',
+  'Any OOMKilled pods in the last hour?',
+  'Check Longhorn storage health',
+  'Are there any Longhorn volume issues?',
+];
 const exBtns = document.getElementById('examples-btns');
-EXAMPLES.forEach(ex => {
+EXAMPLES.forEach(ex=>{
   const btn = document.createElement('button');
   btn.className = 'ex-btn';
   btn.textContent = ex;
-  btn.addEventListener('click', () => sendMessage(ex));
+  btn.onclick = ()=> sendMessage(ex);
   exBtns.appendChild(btn);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HEALTH CHECK — populate model info and tooltip
-// ─────────────────────────────────────────────────────────────────────────────
-let numGpu = 0, modelName = 'qwen2.5:7b';
+// ─── HEALTH → populate tooltip ────────────────────────────────────────────────
+let modelName = 'qwen2.5:7b';
 
-fetch('/health').then(r => r.json()).then(d => {
+fetch('/health').then(r=>r.json()).then(d=>{
   modelName = d.model || 'qwen2.5:7b';
-  numGpu    = d.num_gpu || 0;
-  document.getElementById('subtitle-text').textContent = `Air-gapped · ${modelName}`;
-  const isGpu = numGpu > 0;
-  document.getElementById('tt-mode').textContent  = isGpu ? '🖥️  GPU Inference' : '⚙️  CPU Inference';
-  document.getElementById('tt-mode').style.color  = 'var(--accent2)';
-  document.getElementById('tt-model').textContent = modelName;
-  const note = document.getElementById('tt-note');
-  if (!isGpu) {
-    note.style.color = '#f59e0b';
-    note.textContent = '⚠ Running on CPU. Responses may take 30–90 seconds.';
-  } else {
-    note.style.color = '#22c55e';
-    note.textContent = '✓ GPU acceleration active. Responses will be faster.';
-  }
-}).catch(() => {});
+  const isGpu  = (d.num_gpu || 0) > 0;
+  const isLocal = d.model_source === 'local_dir';
+  const isLocalEmbed = d.embed_source === 'local_dir';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CHAT
-// ─────────────────────────────────────────────────────────────────────────────
+  document.getElementById('subtitle-text').textContent = 'Air-gapped \u00b7 ' + modelName;
+
+  const modeEl = document.getElementById('tt-mode');
+  modeEl.textContent = isGpu ? '\uD83D\uDDA5\uFE0F  GPU Inference' : '\u2699\uFE0F  CPU Inference';
+  modeEl.style.color = 'var(--accent2)';
+
+  document.getElementById('tt-model').textContent = modelName +
+    (isLocal ? ' (local dir)' : ' via Ollama');
+
+  document.getElementById('tt-embed').textContent =
+    'Embed: ' + (isLocalEmbed ? 'local sentence-transformers' : 'Ollama endpoint');
+  document.getElementById('tt-embed').style.color = 'var(--dimText)';
+
+  if(d.chroma_dir){
+    document.getElementById('tt-chroma').textContent = 'ChromaDB: ' + d.chroma_dir;
+    document.getElementById('tt-chroma').style.color = 'var(--dimText)';
+  }
+
+  const noteEl = document.getElementById('tt-note');
+  if(!isGpu){
+    noteEl.style.color = '#f59e0b';
+    noteEl.textContent = '\u26A0 Running on CPU. Responses may take 30\u201390 seconds.';
+  } else {
+    noteEl.style.color = '#22c55e';
+    noteEl.textContent = '\u2713 GPU acceleration active. Responses will be faster.';
+  }
+}).catch(()=>{
+  document.getElementById('subtitle-text').textContent = 'Air-gapped \u00b7 (backend not reachable)';
+});
+
+// ─── CHAT ─────────────────────────────────────────────────────────────────────
 let loading = false;
 const messagesEl = document.getElementById('messages');
 const inputEl    = document.getElementById('chat-input');
 const sendBtn    = document.getElementById('send-btn');
 const readyDot   = document.getElementById('ready-dot');
 const readyText  = document.getElementById('ready-text');
-const examples   = document.getElementById('examples');
+const examplesEl = document.getElementById('examples');
 
-function setLoading(val) {
-  loading = val;
-  sendBtn.disabled = val;
-  sendBtn.textContent = val ? '...' : '→ Send';
-  if (val) {
-    readyDot.style.background = '#f59e0b';
-    readyDot.style.boxShadow  = '0 0 8px #f59e0b';
-    readyDot.style.animation  = 'pls 1s infinite';
-    readyText.textContent = 'thinking';
+function setLoading(v){
+  loading = v;
+  sendBtn.disabled = v;
+  sendBtn.textContent = v ? '...' : '\u2192 Send';
+  if(v){
+    readyDot.style.cssText = 'background:#f59e0b;box-shadow:0 0 8px #f59e0b88;animation:pls 1s infinite';
+    readyText.textContent  = 'thinking';
   } else {
-    readyDot.style.background = '#22c55e';
-    readyDot.style.boxShadow  = '0 0 8px #22c55e';
-    readyDot.style.animation  = 'none';
-    readyText.textContent = 'ready';
+    readyDot.style.cssText = 'background:#22c55e;box-shadow:0 0 8px #22c55e88;animation:none';
+    readyText.textContent  = 'ready';
   }
 }
 
-function scrollBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+function esc(s){
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-function appendUserMsg(text) {
-  examples.style.display = 'none';
-  const wrap = document.createElement('div');
-  wrap.className = 'msg-user fade-up';
-  wrap.innerHTML = `<div class="msg-user-bubble">${escHtml(text)}</div>`;
-  messagesEl.appendChild(wrap);
-  scrollBottom();
+function scrollBot(){ messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+function appendUserMsg(text){
+  examplesEl.style.display = 'none';
+  const d = document.createElement('div');
+  d.className = 'msg-user fade-up';
+  d.innerHTML = '<div class="msg-user-bubble">'+esc(text)+'</div>';
+  messagesEl.appendChild(d);
+  scrollBot();
 }
 
-let thinkingEl = null;
-function showThinking(updates) {
+let thinkEl = null;
+function showThinking(updates){
   removeThinking();
-  thinkingEl = document.createElement('div');
-  thinkingEl.className = 'status-box fade-up';
-  thinkingEl.innerHTML = `
-    <div class="status-label">AGENT STATUS</div>
-    ${updates.map((u,i) => `
-      <div class="status-line${i===updates.length-1?' active':''}">
-        <span>${i===updates.length-1?'›':'✓'}</span>${escHtml(u)}
-      </div>`).join('')}
-    <div class="status-dots">
-      ${[0,1,2].map(i=>`<div class="status-dot-pulse" style="animation-delay:${i*.2}s"></div>`).join('')}
-    </div>`;
-  messagesEl.appendChild(thinkingEl);
-  scrollBottom();
+  thinkEl = document.createElement('div');
+  thinkEl.className = 'status-box fade-up';
+  let rows = '<div class="status-label">AGENT STATUS</div>';
+  updates.forEach((u,i)=>{
+    const cls = i===updates.length-1 ? 'status-line active' : 'status-line';
+    rows += '<div class="'+cls+'"><span>'+(i===updates.length-1?'›':'✓')+'</span>'+esc(u)+'</div>';
+  });
+  rows += '<div class="sdots"><div class="sdot" style="animation-delay:0s"></div>'
+        + '<div class="sdot" style="animation-delay:.2s"></div>'
+        + '<div class="sdot" style="animation-delay:.4s"></div></div>';
+  thinkEl.innerHTML = rows;
+  messagesEl.appendChild(thinkEl);
+  scrollBot();
 }
+function removeThinking(){ if(thinkEl){ thinkEl.remove(); thinkEl=null; } }
 
-function removeThinking() {
-  if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
-}
-
-function appendAiMsg(text, tools, iterations, elapsed) {
-  const wrap = document.createElement('div');
-  wrap.className = 'msg-ai fade-up';
-  const toolBadges = [...new Set(tools)].map(tool =>
-    `<span class="tool-badge">${tool==='search_documentation'?'📄':'⚙'} ${escHtml(tool)}</span>`
+function appendAiMsg(text, tools, iterations, elapsed){
+  const d = document.createElement('div');
+  d.className = 'msg-ai fade-up';
+  const unique = [...new Set(tools||[])];
+  const badges = unique.map(t=>
+    '<span class="tool-badge">'+(t==='search_documentation'?'\uD83D\uDCDA':'\u2699\uFE0F')+' '+esc(t)+'</span>'
   ).join('');
-  wrap.innerHTML = `
-    <div class="msg-ai-icon">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-        <path d="M12 2L3 7v10l9 5 9-5V7L12 2z" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round"/>
-        <circle cx="12" cy="12" r="3" stroke="var(--accent)" stroke-width="1.8"/>
-      </svg>
-    </div>
-    <div class="msg-ai-body">
-      <div class="msg-ai-bubble">${escHtml(text)}</div>
-      ${elapsed!=null?`<div class="msg-elapsed">⏱ ${elapsed}s total</div>`:''}
-      ${tools&&tools.length?`
-        <div class="msg-tools">
-          <span class="tools-meta">called:</span>
-          ${toolBadges}
-          <span class="tools-meta">· ${iterations} iteration${iterations!==1?'s':''}</span>
-        </div>`:''}
-    </div>`;
-  messagesEl.appendChild(wrap);
-  scrollBottom();
+  const toolRow = unique.length
+    ? '<div class="msg-tools"><span class="tools-meta">called:</span>'+badges
+      +'<span class="tools-meta">\u00b7 '+iterations+' iteration'+(iterations!==1?'s':'')+'</span></div>'
+    : '';
+  const elRow = elapsed!=null
+    ? '<div class="msg-elapsed">\u23f1 '+elapsed+'s total</div>' : '';
+  d.innerHTML =
+    '<div class="msg-ai-icon">'
+    +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none">'
+    +'<path d="M12 2L3 7v10l9 5 9-5V7L12 2z" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round"/>'
+    +'<circle cx="12" cy="12" r="3" stroke="var(--accent)" stroke-width="1.8"/></svg></div>'
+    +'<div class="msg-ai-body">'
+    +'<div class="msg-ai-bubble">'+esc(text)+'</div>'
+    + elRow + toolRow
+    +'</div>';
+  messagesEl.appendChild(d);
+  scrollBot();
 }
 
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-          .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-
-async function sendMessage(queryOverride) {
-  const query = queryOverride || inputEl.value.trim();
-  if (!query || loading) return;
+async function sendMessage(override){
+  const query = override || inputEl.value.trim();
+  if(!query || loading) return;
   inputEl.value = '';
   setLoading(true);
-
-  const q = query.toLowerCase();
-  let hint = '🔍 Analysing query...';
-  if (q.includes('longhorn'))    hint = '🔍 Checking Longhorn storage...';
-  else if (q.includes('vault'))  hint = '🔍 Checking vault-system namespace...';
-  else if (q.includes('health')) hint = '🔍 Scanning cluster health...';
-  else if (q.includes('log'))    hint = '🔍 Fetching pod logs...';
-  else if (q.includes('node'))   hint = '🔍 Checking node status...';
-  else if (q.includes('event'))  hint = '🔍 Fetching cluster events...';
-  else if (q.includes('deploy')) hint = '🔍 Checking deployments...';
-
   appendUserMsg(query);
-  showThinking([`🤖 Model: ${modelName}`, hint]);
-
-  try {
-    const res = await fetch('/chat', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({message: query}),
+  const q = query.toLowerCase();
+  let hint = '\uD83D\uDD0D Analysing query\u2026';
+  if(q.includes('longhorn'))    hint='\uD83D\uDD0D Checking Longhorn storage\u2026';
+  else if(q.includes('health')) hint='\uD83D\uDD0D Scanning cluster health\u2026';
+  else if(q.includes('log'))    hint='\uD83D\uDD0D Fetching pod logs\u2026';
+  else if(q.includes('node'))   hint='\uD83D\uDD0D Checking node status\u2026';
+  else if(q.includes('event'))  hint='\uD83D\uDD0D Fetching cluster events\u2026';
+  else if(q.includes('deploy')) hint='\uD83D\uDD0D Checking deployments\u2026';
+  showThinking(['\uD83E\uDD16 Model: '+modelName, hint]);
+  try{
+    const res = await fetch('/chat',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:query}),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Request failed');
-    }
+    if(!res.ok){ const e=await res.json(); throw new Error(e.detail||'Request failed'); }
     const data = await res.json();
     removeThinking();
     appendAiMsg(data.response, data.tools_used, data.iterations, data.elapsed_seconds);
-  } catch (err) {
+  }catch(err){
     removeThinking();
-    appendAiMsg(`⚠ Error: ${err.message}\n\nMake sure the backend is running:\n  python3 app.py`, [], 0, null);
-  } finally {
+    appendAiMsg('\u26A0 Error: '+err.message+'\n\nCheck that the backend is running:\n  python3 app.py',[],0,null);
+  }finally{
     setLoading(false);
   }
 }
 
-sendBtn.addEventListener('click', () => sendMessage());
-inputEl.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+sendBtn.onclick = ()=> sendMessage();
+inputEl.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// METRICS — CPU + GPU panels
-// ─────────────────────────────────────────────────────────────────────────────
-const sparkPts  = [];   // rolling 60 CPU % samples
-const SPARK_W   = 266, SPARK_H = 28;
+// ─── METRICS ──────────────────────────────────────────────────────────────────
+const sparkPts = [];
+const SW=266, SH=28;
 
-function cpuColour(pct) {
-  if (pct < 40) return `hsl(${120 - pct*1.5},100%,45%)`;
-  if (pct < 70) return `hsl(${60  - (pct-40)*1.5},100%,50%)`;
-  return               `hsl(${25  - (pct-70)*0.8},100%,50%)`;
+function cpuCol(p){
+  if(p<40) return 'hsl('+(120-p*1.5)+',100%,45%)';
+  if(p<70) return 'hsl('+(60-(p-40)*1.5)+',100%,50%)';
+  return 'hsl('+(25-(p-70)*0.8)+',100%,50%)';
 }
-function gpuColour(pct) {
-  if (pct < 50) return `hsl(${200 - pct*0.4},100%,55%)`;
-  if (pct < 80) return `hsl(${180 - (pct-50)*4},100%,50%)`;
-  return               `hsl(${60  - (pct-80)*3},100%,50%)`;
+function gpuCol(p){
+  if(p<50) return 'hsl('+(200-p*0.4)+',100%,55%)';
+  if(p<80) return 'hsl('+(180-(p-50)*4)+',100%,50%)';
+  return 'hsl('+(60-(p-80)*3)+',100%,50%)';
 }
-function tempColour(c) {
-  if (c < 60) return '#22c55e';
-  if (c < 75) return '#f59e0b';
-  return '#ef4444';
-}
+function tempCol(c){ return c<60?'#22c55e':c<75?'#f59e0b':'#ef4444'; }
 
-function renderDotBar(container, pct) {
-  const COLS   = 33;
-  const filled = Math.round((pct/100) * COLS);
-  container.innerHTML = '';
-  for (let i = 0; i < COLS; i++) {
-    const active = i < filled;
-    const col    = active ? cpuColour((i/COLS)*100) : 'transparent';
-    const d      = document.createElement('div');
-    d.style.cssText = `width:4px;height:8px;border-radius:1px;flex-shrink:0;
-      background:${active?col:'transparent'};
-      border:1px solid ${active?col:'var(--cpuBorder)22'};`;
-    container.appendChild(d);
+function renderDotBar(el, pct){
+  const COLS=33, filled=Math.round((pct/100)*COLS);
+  let h='';
+  for(let i=0;i<COLS;i++){
+    const a=i<filled, col=a?cpuCol((i/COLS)*100):'transparent';
+    h+='<div style="width:4px;height:8px;border-radius:1px;flex-shrink:0;background:'
+      +col+';border:1px solid '+(a?col:'var(--cpuBorder)22')+'"></div>';
   }
+  el.innerHTML=h;
 }
 
-function renderSparkline(svg, pts, totalPct) {
-  if (pts.length < 2) { svg.innerHTML=''; return; }
-  const col  = cpuColour(totalPct);
-  const n    = pts.length;
-  const poly = pts.map((v,i) => {
-    const x = (i / 59) * SPARK_W;
-    const y = SPARK_H - (v / 100) * SPARK_H;
-    return `${x},${y}`;
+function renderSpark(svg, pts, totalPct){
+  if(pts.length<2){svg.innerHTML='';return;}
+  const col=cpuCol(totalPct);
+  const poly=pts.map((v,i)=>{
+    const x=(i/59)*SW, y=SH-(v/100)*SH; return x+','+y;
   }).join(' ');
-  svg.innerHTML = `
-    <defs>
-      <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${col}" stop-opacity="0.4"/>
-        <stop offset="100%" stop-color="${col}" stop-opacity="0.05"/>
-      </linearGradient>
-    </defs>
-    <polyline points="${poly}" fill="none" stroke="${col}" stroke-width="1.5"/>
-    <polygon points="0,${SPARK_H} ${poly} ${SPARK_W},${SPARK_H}" fill="url(#sg)"/>`;
+  svg.innerHTML='<defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">'
+    +'<stop offset="0%" stop-color="'+col+'" stop-opacity="0.4"/>'
+    +'<stop offset="100%" stop-color="'+col+'" stop-opacity="0.05"/>'
+    +'</linearGradient></defs>'
+    +'<polyline points="'+poly+'" fill="none" stroke="'+col+'" stroke-width="1.5"/>'
+    +'<polygon points="0,'+SH+' '+poly+' '+SW+','+SH+'" fill="url(#sg)"/>';
 }
 
-function renderCoreGrid(container, cores) {
-  const cols   = cores.length > 12 ? 3 : cores.length > 6 ? 2 : 1;
-  const perCol = Math.ceil(cores.length / cols);
-  container.innerHTML = '';
-  for (let ci = 0; ci < cols; ci++) {
-    const colEl = document.createElement('div');
-    colEl.className = 'core-col';
-    const group = cores.slice(ci*perCol, (ci+1)*perCol);
-    group.forEach((pct, i) => {
-      const idx  = ci*perCol + i;
-      const col  = cpuColour(pct);
-      const hot  = pct > 80;
-      const bg   = document.documentElement.style.getPropertyValue('--cpuBg') || '#020a14';
-      colEl.innerHTML += `
-        <div class="core-row">
-          <span class="core-lbl">C${idx+1}</span>
-          <div class="core-track">
-            <div class="core-track-bg"></div>
-            <div class="core-track-fill" style="width:${pct}%;background:${col}"></div>
-            <div class="core-track-dots"></div>
-          </div>
-          <span class="core-pct${hot?' hot':''}" style="${hot?`color:${col}`:''}">
-            ${pct}%
-          </span>
-        </div>`;
+function renderCores(el, cores){
+  const cols=cores.length>12?3:cores.length>6?2:1;
+  const perCol=Math.ceil(cores.length/cols);
+  let h='';
+  for(let ci=0;ci<cols;ci++){
+    h+='<div class="core-col">';
+    const grp=cores.slice(ci*perCol,(ci+1)*perCol);
+    grp.forEach((pct,i)=>{
+      const idx=ci*perCol+i, col=cpuCol(pct), hot=pct>80;
+      h+='<div class="core-row">'
+        +'<span class="core-lbl">C'+(idx+1)+'</span>'
+        +'<div class="core-track"><div class="core-bg"></div>'
+        +'<div class="core-fill" style="width:'+pct+'%;background:'+col+'"></div>'
+        +'<div class="core-dots"></div></div>'
+        +'<span class="core-pct'+(hot?' hot':'')+'"'+(hot?' style="color:'+col+';font-weight:700"':'')+'>'
+        +pct+'%</span></div>';
     });
-    container.appendChild(colEl);
+    h+='</div>';
   }
+  el.innerHTML=h;
 }
 
-function renderGpuCards(container, gpus) {
-  container.innerHTML = '';
-  gpus.forEach(gpu => {
-    const utilCol  = gpuColour(gpu.util_pct);
-    const memCol   = gpuColour(gpu.mem_pct);
-    const tCol     = tempColour(gpu.temp_c);
-    const shortName = gpu.name.replace(/NVIDIA\s*/gi,'').replace(/GeForce\s*/gi,'').trim();
-    const card = document.createElement('div');
-    card.className = 'gpu-card';
-    card.innerHTML = `
-      <div class="gpu-card-hdr">
-        <span class="gpu-idx">GPU ${gpu.index}</span>
-        <span class="gpu-name" title="${escHtml(gpu.name)}">${escHtml(shortName)}</span>
-      </div>
-      <div>
-        <div class="gpu-bar-row">
-          <span class="gpu-bar-lbl">Utilisation</span>
-          <span class="gpu-bar-val" style="color:${utilCol}">${gpu.util_pct}%</span>
-        </div>
-        <div class="gpu-track">
-          <div class="gpu-fill" style="width:${gpu.util_pct}%;background:${utilCol};box-shadow:0 0 6px ${utilCol}88"></div>
-          <div class="gpu-stripe"></div>
-        </div>
-      </div>
-      <div>
-        <div class="gpu-bar-row">
-          <span class="gpu-bar-lbl">VRAM</span>
-          <span class="gpu-bar-val" style="color:${memCol};font-weight:400;font-size:11px">${gpu.mem_used_gb}/${gpu.mem_total_gb} GB</span>
-        </div>
-        <div class="gpu-vram-track">
-          <div class="gpu-vram-fill" style="width:${gpu.mem_pct}%;background:${memCol}"></div>
-        </div>
-      </div>
-      <div class="gpu-meta">
-        <span>🌡 <span style="color:${tCol};font-weight:700">${gpu.temp_c}°C</span></span>
-        ${gpu.power_w!=null?`<span>⚡ <span style="color:var(--dimText)">${gpu.power_w} W</span></span>`:''}
-      </div>`;
-    container.appendChild(card);
+function renderGpuCards(el, gpus){
+  el.innerHTML='';
+  gpus.forEach(gpu=>{
+    const uc=gpuCol(gpu.util_pct), mc=gpuCol(gpu.mem_pct), tc=tempCol(gpu.temp_c);
+    const sn=gpu.name.replace(/NVIDIA\s*/i,'').replace(/GeForce\s*/i,'').trim();
+    const card=document.createElement('div');
+    card.className='gpu-card';
+    card.innerHTML=
+      '<div class="gpu-chdr"><span class="gpu-idx">GPU '+gpu.index+'</span>'
+      +'<span class="gpu-name" title="'+esc(gpu.name)+'">'+esc(sn)+'</span></div>'
+      +'<div><div class="bar-row"><span class="bar-lbl">Utilisation</span>'
+      +'<span class="bar-val" style="color:'+uc+'">'+gpu.util_pct+'%</span></div>'
+      +'<div class="gpu-track"><div class="gpu-fill" style="width:'+gpu.util_pct+'%;background:'+uc+';box-shadow:0 0 6px '+uc+'88"></div>'
+      +'<div class="gpu-stripe"></div></div></div>'
+      +'<div><div class="bar-row"><span class="bar-lbl">VRAM</span>'
+      +'<span class="bar-val" style="color:'+mc+';font-weight:400;font-size:11px">'+gpu.mem_used_gb+'/'+gpu.mem_total_gb+' GB</span></div>'
+      +'<div class="vram-track"><div class="vram-fill" style="width:'+gpu.mem_pct+'%;background:'+mc+'"></div></div></div>'
+      +'<div class="gpu-meta">'
+      +'<span>\uD83C\uDF21 <span style="color:'+tc+';font-weight:700">'+gpu.temp_c+'\u00b0C</span></span>'
+      +(gpu.power_w!=null?'<span>\u26A1 <span style="color:var(--dimText)">'+gpu.power_w+' W</span></span>':'')
+      +'</div>';
+    el.appendChild(card);
   });
 }
 
-async function pollMetrics() {
-  try {
+const coresGridEl  = document.getElementById('cores-grid');
+const sparkSvg     = document.getElementById('sparkline');
+const cpuDotbar    = document.getElementById('cpu-dotbar');
+const cpuTotalPct  = document.getElementById('cpu-total-pct');
+const cpuFreqLbl   = document.getElementById('cpu-freq-lbl');
+const ramFill      = document.getElementById('ram-fill');
+const ramVal       = document.getElementById('ram-val');
+const loadAvg      = document.getElementById('load-avg');
+const gpuPanel     = document.getElementById('gpu-panel');
+const gpuCountLbl  = document.getElementById('gpu-count-lbl');
+const gpuCardsEl   = document.getElementById('gpu-cards');
+
+let metricsOk = false;
+
+async function pollMetrics(){
+  try{
     const r = await fetch('/metrics');
-    if (!r.ok) return;
+    if(!r.ok) return;
     const d = await r.json();
+    metricsOk = true;
 
     // Sparkline
     sparkPts.push(d.cpu_total);
-    if (sparkPts.length > 60) sparkPts.shift();
-    renderSparkline(document.getElementById('sparkline'), sparkPts, d.cpu_total);
+    if(sparkPts.length>60) sparkPts.shift();
+    renderSpark(sparkSvg, sparkPts, d.cpu_total);
 
-    // Overall CPU dotbar + pct
-    renderDotBar(document.getElementById('cpu-dotbar'), d.cpu_total);
-    const totalEl = document.getElementById('cpu-total-pct');
-    totalEl.textContent = d.cpu_total + '%';
-    totalEl.style.color = cpuColour(d.cpu_total);
+    // Dotbar + total
+    renderDotBar(cpuDotbar, d.cpu_total);
+    cpuTotalPct.textContent = d.cpu_total+'%';
+    cpuTotalPct.style.color = cpuCol(d.cpu_total);
 
-    // Freq label
-    document.getElementById('cpu-freq-lbl').textContent =
-      `${(d.freq_mhz/1000).toFixed(1)} GHz · ${d.cpu_count}C`;
+    // Freq
+    const ghz = d.freq_mhz ? (d.freq_mhz/1000).toFixed(1)+' GHz' : '\u2014 GHz';
+    cpuFreqLbl.textContent = ghz + ' \u00b7 ' + (d.cpu_count||'?')+'C';
 
-    // Core grid
-    renderCoreGrid(document.getElementById('cores-grid'), d.cpu_per_core || []);
+    // Cores
+    renderCores(coresGridEl, d.cpu_per_core||[]);
 
     // RAM
-    const ram = document.getElementById('ram-fill');
-    ram.style.width      = d.mem_pct + '%';
-    ram.style.background = cpuColour(d.mem_pct);
-    document.getElementById('ram-val').textContent =
-      `${d.mem_used_gb}/${d.mem_total_gb} GB`;
+    ramFill.style.width      = (d.mem_pct||0)+'%';
+    ramFill.style.background = cpuCol(d.mem_pct||0);
+    ramVal.textContent = (d.mem_used_gb||0)+'/'+(d.mem_total_gb||0)+' GB';
 
     // Load avg
-    const [la1,la5,la15] = d.load_avg || [0,0,0];
-    document.getElementById('load-avg').textContent = `${la1}  ${la5}  ${la15}`;
+    const [a,b,c] = d.load_avg||[0,0,0];
+    loadAvg.textContent = a+'  '+b+'  '+c;
 
     // GPUs
-    const gpus = d.gpus || [];
-    const gpuPanel = document.getElementById('gpu-panel');
-    if (gpus.length > 0) {
-      gpuPanel.style.display = 'flex';
-      document.getElementById('gpu-count-lbl').textContent =
-        `${gpus.length} device${gpus.length>1?'s':''}`;
-      renderGpuCards(do
+    const gpus = d.gpus||[];
+    if(gpus.length>0){
+      gpuPanel.style.display='flex';
+      gpuCountLbl.textContent = gpus.length+' device'+(gpus.length>1?'s':'');
+      renderGpuCards(gpuCardsEl, gpus);
+    } else {
+      gpuPanel.style.display='none';
+    }
+  }catch(e){
+    // silently retry
+  }
+}
+
+// Start polling immediately, then every 1.5s
+pollMetrics();
+setInterval(pollMetrics, 1500);
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+applyTheme('midnight');
+
+})(); // end IIFE — keeps all vars out of global scope
+</script>
+</body>
+</html>
