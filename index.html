@@ -254,7 +254,7 @@ button{cursor:pointer}
       </div>
     </div>
     <div id="header-right">
-      <a id="email-link" href="mailto:dennislee@cloudera.com">✉ dennislee@cloudera.com</a>
+      <a id="email-link" href="/cdn-cgi/l/email-protection#1c78797272756f7079795c7f70736978796e7d327f7371">✉ <span class="__cf_email__" data-cfemail="93f7f6fdfdfae0fff6f6d3f0fffce6f7f6e1f2bdf0fcfe">[email&#160;protected]</span></a>
       <div id="theme-row">
         <span id="theme-label">THEME</span>
         <div id="theme-dots">
@@ -341,7 +341,7 @@ button{cursor:pointer}
   </div><!-- #body -->
 </div><!-- #app -->
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 // ─────────────────────────────────────────────────────────────────────────────
 // THEMES
 // ─────────────────────────────────────────────────────────────────────────────
@@ -771,20 +771,4 @@ async function pollMetrics() {
       gpuPanel.style.display = 'flex';
       document.getElementById('gpu-count-lbl').textContent =
         `${gpus.length} device${gpus.length>1?'s':''}`;
-      renderGpuCards(document.getElementById('gpu-cards'), gpus);
-    } else {
-      gpuPanel.style.display = 'none';
-    }
-
-  } catch {}
-}
-
-// Poll every 1.5s
-pollMetrics();
-setInterval(pollMetrics, 1500);
-
-// Init theme
-applyTheme('midnight');
-</script>
-</body>
-</html>
+      renderGpuCards(do
