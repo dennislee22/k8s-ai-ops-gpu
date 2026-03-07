@@ -202,23 +202,55 @@ def get_node_health() -> str:
 
 # ── Events ────────────────────────────────────────────────────────────────────
 
+# Event messages to suppress at tool level — these are environment noise that
+# the LLM is instructed to ignore anyway, but filtering here prevents the raw
+# text from leaking into LLM context and triggering confusing responses.
+_EVENT_NOISE_PATTERNS = [
+    "cgroup",       # cgroupv1/v2 maintenance mode warnings — environment constraint, not actionable
+    "cgroupv",
+    "cgroup v1",
+    "cgroup v2",
+]
+
+def _is_noisy_event(message: str) -> bool:
+    """Return True if the event message is known background noise."""
+    msg_lower = (message or "").lower()
+    return any(pat in msg_lower for pat in _EVENT_NOISE_PATTERNS)
+
+
 def get_events(namespace: str = "all", warning_only: bool = True) -> str:
     try:
         fs = "type=Warning" if warning_only else ""
-        ev = (_core.list_event_for_all_namespaces(field_selector=fs)
+        ev = (_core.list_event_for_all_namespaces(field_selector=fs, limit=500)
               if namespace == "all"
               else _core.list_namespaced_event(namespace=namespace,
-                                               field_selector=fs))
+                                               field_selector=fs, limit=500))
         if not ev.items:
             return f"No {'warning ' if warning_only else ''}events in '{namespace}'."
-        sev   = sorted(ev.items,
-                       key=lambda e: e.last_timestamp or e.event_time or "",
-                       reverse=True)[:20]
-        lines = [f"Recent events in '{namespace}':"]
+
+        # Sort newest-first, cap at 20, suppress known noise
+        sev = sorted(ev.items,
+                     key=lambda e: e.last_timestamp or e.event_time or "",
+                     reverse=True)
+
+        lines      = [f"Recent events in '{namespace}':"]
+        shown      = 0
+        suppressed = 0
         for e in sev:
+            if shown >= 20:
+                break
+            if _is_noisy_event(e.message):
+                suppressed += 1
+                continue
             lines.append(
                 f"  [{e.type}] {e.involved_object.kind}/{e.involved_object.name}: "
                 f"{e.reason} — {e.message} (x{e.count or 1})")
+            shown += 1
+
+        if suppressed:
+            lines.append(f"  ({suppressed} environment-noise event(s) suppressed)")
+        if shown == 0:
+            return f"No actionable events in '{namespace}' (all were background noise)."
         return "\n".join(lines)
     except ApiException as e:
         return f"K8s API error: {e.reason}"
@@ -531,21 +563,28 @@ def get_cluster_role_bindings() -> str:
 # ── Namespaces ────────────────────────────────────────────────────────────────
 
 def get_namespace_status() -> str:
-    """List all namespaces and their phase."""
-    try:
-        nss = _core.list_namespace()
-        if not nss.items:
-            return "No namespaces found."
-        lines = ["Namespaces:"]
-        for ns in nss.items:
-            phase = ns.status.phase or "Unknown"
-            labels = {k: v for k, v in (ns.metadata.labels or {}).items()
-                      if not k.startswith("kubernetes.io/")}
-            lines.append(f"  {ns.metadata.name}: {phase}"
-                         + (f" labels:{labels}" if labels else ""))
-        return "\n".join(lines)
-    except ApiException as e:
-        return f"K8s API error: {e.reason}"
+    """
+    List ALL namespaces and their phase/status.
+
+    Uses kubectl directly to bypass the Python SDK's silent pagination cap,
+    which can under-report namespace counts on large clusters.
+    """
+    result = kubectl_exec("kubectl get namespaces -o wide")
+    if result.startswith("[ERROR]"):
+        # Fallback to SDK if kubectl is unavailable
+        try:
+            nss   = _core.list_namespace(limit=1000)
+            lines = [f"Namespaces (total: {len(nss.items)}):"]
+            for ns in nss.items:
+                phase = ns.status.phase or "Unknown"
+                lines.append(f"  {ns.metadata.name}: {phase}")
+            return "\n".join(lines)
+        except ApiException as e:
+            return f"K8s API error: {e.reason}"
+    # Prepend a total-count header so the LLM always sees the real number
+    rows = [r for r in result.strip().splitlines() if r and not r.startswith("NAME")]
+    header = f"Namespaces (total: {len(rows)}):\n"
+    return header + result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -717,8 +756,8 @@ def kubectl_exec(command: str) -> str:
             combined = f"[exit {result.returncode}]\n{combined}"
 
         # Truncate to protect LLM context window
-        if len(combined) > _KUBECTL_MAX_CHARS:
-            combined = combined[:_KUBECTL_MAX_CHARS] + f"\n...[output truncated at {_KUBECTL_MAX_CHARS} chars]"
+        if len(combined) > _KUBECTL_MAX_OUT:
+            combined = combined[:_KUBECTL_MAX_OUT] + f"\n...[output truncated at {_KUBECTL_MAX_OUT} chars]"
 
         return combined or "(empty output)"
 
