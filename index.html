@@ -419,6 +419,7 @@ button{cursor:pointer;font-family:inherit}
 </div><!-- #app -->
 
 <script>
+
 (function(){
 'use strict';
 
@@ -571,40 +572,20 @@ async function fetchHealth(retries){
     const d = await r.json();
     modelName = d.model || 'qwen2.5:7b';
     isGpu     = (d.num_gpu || 0) > 0;
-
-    document.getElementById('sub-txt').textContent =
-      'Air-gapped \u00b7 ' + modelName;
-
+    document.getElementById('sub-txt').textContent = 'Air-gapped \u00b7 ' + modelName;
     const modeEl = document.getElementById('tt-mode');
-    modeEl.textContent = isGpu
-      ? '\uD83D\uDDA5\uFE0F  GPU Inference \u2014 Active'
-      : '\u2699\uFE0F  CPU Inference \u2014 Active';
+    modeEl.textContent = isGpu ? '\uD83D\uDDA5\uFE0F  GPU Inference \u2014 Active' : '\u2699\uFE0F  CPU Inference \u2014 Active';
     modeEl.style.color = isGpu ? '#22c55e' : '#f59e0b';
-
-    document.getElementById('tt-model').textContent =
-      modelName + (d.model_source==='local_dir' ? ' (local)' : ' via Ollama');
-    document.getElementById('tt-embed').textContent =
-      d.embed_source==='local_dir' ? 'local sentence-transformers' : 'Ollama endpoint';
-    if(d.chroma_dir){
-      document.getElementById('tt-chroma').textContent = d.chroma_dir;
-    }
+    document.getElementById('tt-model').textContent = modelName + (d.model_source==='local_dir' ? ' (local)' : ' via Ollama');
+    document.getElementById('tt-embed').textContent = d.embed_source==='local_dir' ? 'local sentence-transformers' : 'Ollama endpoint';
+    if(d.chroma_dir){ document.getElementById('tt-chroma').textContent = d.chroma_dir; }
     const note = document.getElementById('tt-note');
-    if(!isGpu){
-      note.style.color = '#f59e0b';
-      note.textContent = '\u26A0 CPU mode \u2014 responses may take 30\u201390s.';
-    } else {
-      note.style.color = '#22c55e';
-      note.textContent = '\u2713 GPU acceleration active.';
-    }
-
+    if(!isGpu){ note.style.color='#f59e0b'; note.textContent='\u26A0 CPU mode \u2014 responses may take 30\u201390s.'; }
+    else { note.style.color='#22c55e'; note.textContent='\u2713 GPU acceleration active.'; }
     updateInferenceBadge();
   } catch(e){
-    if(retries > 0){
-      setTimeout(()=> fetchHealth(retries-1), 3000);
-      document.getElementById('sub-txt').textContent = 'Air-gapped \u00b7 connecting\u2026';
-    } else {
-      document.getElementById('sub-txt').textContent = 'Air-gapped \u00b7 backend unreachable';
-    }
+    if(retries > 0){ setTimeout(()=>fetchHealth(retries-1), 3000); }
+    else { document.getElementById('sub-txt').textContent = 'Air-gapped \u00b7 backend unreachable'; }
   }
 }
 fetchHealth(10);
@@ -905,8 +886,7 @@ async function pollMetrics(){
       gpuNoEl.style.display  = 'none';
       if(gpuInferDot){ gpuInferDot.style.background='#22c55e'; gpuInferDot.style.boxShadow='0 0 6px #22c55e88'; }
       if(gpuInferTxt){ gpuInferTxt.textContent='\u26A1 GPU'; gpuInferTxt.style.color='#22c55e'; }
-    } else if(d.num_gpu > 0) {
-      // GPU detected but pynvml not returning data yet
+    } else if(d.num_gpu > 0){
       gpuPanel.style.display = 'flex';
       gpuCntEl.textContent   = d.num_gpu+' device'+(d.num_gpu>1?'s':'');
       gpuNoEl.style.display  = 'none';
@@ -928,3 +908,7 @@ pollMetrics();
 setInterval(pollMetrics, 1500);
 
 // ═════════════════════════════════════════════════════════
+})();
+</script>
+</body>
+</html>
