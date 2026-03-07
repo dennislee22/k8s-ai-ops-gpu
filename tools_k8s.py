@@ -78,12 +78,26 @@ def get_pod_status(namespace: str = "all", show_all: bool = False) -> str:
     show_all=True when the user asks for a count or a complete pod listing.
     """
     try:
+        if namespace != "all":
+            # Verify the namespace actually exists before listing pods.
+            # This lets us give an honest "namespace does not exist" vs
+            # "namespace exists but has 0 pods" — critical for count accuracy.
+            try:
+                _core.read_namespace(name=namespace)
+            except ApiException as e:
+                if e.status == 404:
+                    return (f"Namespace '{namespace}' does not exist in this cluster. "
+                            f"Cannot report pod count for a non-existent namespace.")
+                raise
+
         pods = (_core.list_pod_for_all_namespaces() if namespace == "all"
                 else _core.list_namespaced_pod(namespace=namespace))
-        if not pods.items:
-            return f"No pods found in namespace '{namespace}'."
 
-        lines   = [f"Pods in '{namespace}' (total: {len(pods.items)}):"]
+        if not pods.items:
+            return f"Namespace '{namespace}' exists but has 0 pods."
+
+        total  = len(pods.items)
+        lines   = [f"Pods in '{namespace}': {total} total."]
         healthy = []
         unhealthy = []
 
@@ -91,19 +105,16 @@ def get_pod_status(namespace: str = "all", show_all: bool = False) -> str:
             phase    = pod.status.phase or "Unknown"
             restarts = sum(cs.restart_count for cs in (pod.status.container_statuses or []))
             ready    = sum(1 for cs in (pod.status.container_statuses or []) if cs.ready)
-            total    = len(pod.spec.containers)
+            tot      = len(pod.spec.containers)
             bad      = [f"{c.type}={c.status}"
                         for c in (pod.status.conditions or []) if c.status != "True"]
             row = (
                 f"  {pod.metadata.namespace}/{pod.metadata.name}: {phase} "
-                f"| Ready {ready}/{total} | Restarts:{restarts}"
+                f"| Ready {ready}/{tot} | Restarts:{restarts}"
                 + (f" [{', '.join(bad)}]" if bad else "")
             )
-            # Healthy = running/ready with ≤5 lifetime restarts.
-            # Low restart counts from rolling upgrades are normal in production
-            # clusters (e.g. Longhorn). Threshold of 0 creates too much noise.
             is_ok = (phase in ("Running", "Succeeded", "Completed")
-                     and ready == total and restarts <= 5)
+                     and ready == tot and restarts <= 5)
             if is_ok:
                 healthy.append(row)
             else:
@@ -117,8 +128,7 @@ def get_pod_status(namespace: str = "all", show_all: bool = False) -> str:
                 lines.append(f"  ({len(healthy)} healthy pod(s) omitted — use show_all=true to list them)")
 
         if len(lines) == 1:
-            # Only the header — everything was healthy
-            return (f"All {len(pods.items)} pod(s) healthy in namespace '{namespace}'.\n"
+            return (f"All {total} pod(s) healthy in namespace '{namespace}'.\n"
                     + "\n".join(healthy))
         return "\n".join(lines)
     except ApiException as e:
@@ -623,10 +633,12 @@ def get_namespace_status() -> str:
                 break
         if not items:
             return "No namespaces found."
-        lines = [f"Namespaces (total: {len(items)}):"]
+        active = sum(1 for ns in items if (ns.status.phase or "Active") == "Active")
+        # Lead line is a plain-English count the LLM can quote directly
+        lines = [f"Total namespaces: {len(items)} ({active} Active)."]
         for ns in items:
             lines.append(
-                f"  {ns.metadata.name:<40} {ns.status.phase or 'Unknown'}"
+                f"  {ns.metadata.name:<40} {ns.status.phase or 'Active'}"
             )
         return "\n".join(lines)
     except ApiException as e:

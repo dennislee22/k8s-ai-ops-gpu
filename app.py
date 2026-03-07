@@ -425,29 +425,64 @@ def build_agent():
     prompt = SYSTEM_PROMPT.format(rag_instruction=RAG_INSTRUCTION if PHASE >= 2 else "", custom_rules=CUSTOM_RULES or "None.")
     llm = _build_llm().bind_tools(lc_tools)
 
+    # Known namespace aliases: map shorthand the user might type to real k8s names.
+    # Add entries here as new namespaces are discovered in the cluster.
+    _NS_ALIASES = {
+        "vault":    "vault-system",
+        "longhorn": "longhorn-system",
+        "cattle":   "cattle-system",
+        "rancher":  "cattle-system",
+        "cert":     "cert-manager",
+    }
+
+    def _resolve_namespace(lm: str) -> str:
+        """
+        Extract a namespace from the user message and resolve known aliases.
+        Returns 'all' if no namespace is found.
+        """
+        # Explicit "in/for/namespace/ns <name>" pattern
+        m = re.search(r'(?:in|for|namespace|ns)\s+([a-z0-9-]+)', lm)
+        if m:
+            raw = m.group(1)
+            if raw not in ("all", "namespace", "ns", "the", "this"):
+                return _NS_ALIASES.get(raw, raw)
+
+        # Bare keyword match against alias table
+        for keyword, real_ns in _NS_ALIASES.items():
+            if keyword in lm:
+                return real_ns
+
+        return "all"
+
     def _default_tools_for(user_msg: str):
         lm = user_msg.lower()
-        ns = "all"
-        
-        # Smart namespace extraction from query
-        m = re.search(r'(?:in|for|namespace|ns)\s+([a-z0-9-]+)', lm)
-        if m and m.group(1) not in ("all", "namespace", "ns", "the", "this"):
-            ns = m.group(1)
-        elif "vault" in lm:
-            ns = "vault-system"
-        elif "longhorn" in lm:
-            ns = "longhorn-system"
+        ns = _resolve_namespace(lm)
 
-        # Map queries to tools - FIXED routing
-        is_asking_for_count = any(k in lm for k in ["how many", "list"])
-        
-        if any(k in lm for k in ["namespace", "ns", "namespaces"]) and (not m or is_asking_for_count):
+        # "how many namespaces" / "list namespaces" — count query, not pod query
+        is_ns_count_query = (
+            any(k in lm for k in ["how many namespace", "list namespace", "how many ns"])
+            or (any(k in lm for k in ["namespace", "namespaces"])
+                and any(k in lm for k in ["how many", "list", "count"])
+                and "pod" not in lm)
+        )
+        if is_ns_count_query:
             return [("get_namespace_status", {})]
+
+        # Pod count for a specific namespace — MUST use get_pod_status, not get_namespace_status
+        is_pod_count_query = any(k in lm for k in ["how many pod", "list pod", "pods in", "pod in"])
+        if is_pod_count_query:
+            # Validate: only query if a real namespace was resolved (not "all")
+            # If the user typed a namespace name that doesn't match any alias, pass it
+            # through — get_pod_status will return "No pods found" for a missing ns,
+            # which is honest rather than hallucinating a count.
+            return [("get_pod_status", {"namespace": ns, "show_all": True})]
+
         if any(k in lm for k in ["node", "pressure"]):
             return [("get_node_health", {})]
+
         if any(k in lm for k in ["pvc", "volume", "storage"]):
             return [("get_pvc_status", {"namespace": ns})]
-            
+
         return [("get_node_health", {}), ("get_pod_status", {"namespace": ns, "show_all": True})]
 
     def _prepare_messages_for_hf(msgs: list) -> list:
