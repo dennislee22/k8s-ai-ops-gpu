@@ -1,28 +1,27 @@
 # Cloudera ECS AI Ops — Python dependencies
 # Install: pip install -r requirements.txt
-# No Node.js, no PostgreSQL, no external vector DB required.
 
 # ── Web framework ─────────────────────────────────────────────────────────────
 fastapi>=0.111
 uvicorn[standard]>=0.29
 
-# ── LLM / Agent (Ollama-based) ────────────────────────────────────────────────
-langchain-ollama>=0.1
+# ── LLM / Agent ───────────────────────────────────────────────────────────────
 langchain-core>=0.2
 langgraph>=0.1
 
-# ── Kubernetes ────────────────────────────────────────────────────────────────
+# ── LLM backend: HuggingFace Transformers (local model via --model-dir) ───────
+# pip install -U langchain-huggingface transformers torch accelerate
+# (listed separately as they require GPU/large-download setup)
+
+# ── Kubernetes — Python API client (talks directly to remote cluster) ─────────
 kubernetes>=29.0
+pyyaml>=6.0           # used by kubectl_exec for YAML output formatting
 
 # ── Vector DB: ChromaDB (embedded, no external server needed) ─────────────────
 chromadb>=0.5
 
-# ── Embeddings: sentence-transformers (supports local dir + GPU via --embed-dir)
+# ── Embeddings ────────────────────────────────────────────────────────────────
 sentence-transformers>=3.0
-
-# ── GPU support for embedding model (sentence-transformers uses torch) ─────────
-# Installs CPU-only torch by default. For NVIDIA GPU replace with:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu121
 torch>=2.0
 
 # ── Document parsing (Phase 2 RAG) ────────────────────────────────────────────
@@ -38,6 +37,3 @@ python-dotenv>=1.0
 
 # ── GPU monitoring (NVIDIA only) ──────────────────────────────────────────────
 nvidia-ml-py>=12.0
-
-# ── OPTIONAL: Load LLM from local directory without Ollama (--model-dir) ──────
-# pip install -U langchain-huggingface transformers accelerate

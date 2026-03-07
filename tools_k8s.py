@@ -9,22 +9,19 @@ All K8s tool functions live here.  To add a new tool:
 
 No other file needs to change.
 
-kubectl_exec integration
-------------------------
-Incorporates the kubectl-ai (GoogleCloudPlatform/kubectl-ai) command execution
-model in pure Python:
-  - Read/write command classification (mirrors kubectl_filter.go logic)
-  - Dangerous-command blocking (edit, port-forward, interactive exec -it)
-  - Streaming-command detection (watch, follow-logs, attach)
-  - Subprocess execution with KUBECONFIG injection and timeout
-  - Output truncation to keep LLM context clean
+kubectl_exec implementation
+----------------------------
+Uses the kubernetes Python client to talk directly to the remote cluster
+API server over HTTPS. No local kubectl binary or PATH configuration needed.
+Commands are parsed and routed to the appropriate API client calls.
 """
 
 import os
 import re
 import shlex
-import subprocess
 import logging
+import json as _json
+import yaml as _yaml
 from pathlib import Path
 
 from kubernetes import client as _k8s, config as _k8s_cfg
@@ -562,258 +559,874 @@ def get_cluster_role_bindings() -> str:
 
 # ── Namespaces ────────────────────────────────────────────────────────────────
 
+
 def get_namespace_status() -> str:
-    """
-    List ALL namespaces and their phase/status via kubectl.
-
-    Uses kubectl directly — the Python SDK connects to a different context
-    and under-reports namespace counts. kubectl uses the same kubeconfig
-    as the operator's shell and always returns the correct full list.
-    """
-    result = kubectl_exec("kubectl get namespaces --no-headers")
-    if result.startswith("[ERROR]") or "not found" in result.lower():
-        return (
-            f"kubectl is not accessible: {result}\n"
-            "Set KUBECTL_BIN=/path/to/kubectl in your env file to fix this."
-        )
-    ns_lines = [r for r in result.strip().splitlines() if r.strip()]
-    return f"Namespaces (total: {len(ns_lines)}):\n{result}"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# KUBECTL EXEC — kubectl-ai command execution layer (pure Python port)
-#
-# Ported from GoogleCloudPlatform/kubectl-ai:
-#   pkg/tools/kubectl_tool.go  — command execution & validation
-#   pkg/tools/kubectl_filter.go — read/write classification
-#   pkg/tools/bash_tool.go     — streaming detection
-#
-# Design decisions:
-#   • READ-ONLY by default: write ops are blocked unless KUBECTL_ALLOW_WRITES=true
-#   • Dangerous interactive/streaming commands are always blocked
-#   • KUBECONFIG is injected from KUBECONFIG_PATH env (same source as SDK tools)
-#   • Output is truncated to MAX_OUTPUT_CHARS to protect LLM context window
-#   • Timeout defaults to 30 s; override with KUBECTL_TIMEOUT env var
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── Constants (mirrors kubectl_filter.go) ─────────────────────────────────────
-
-_KUBECTL_READ_ONLY_OPS = {
-    "get", "describe", "explain", "top", "logs", "api-resources",
-    "api-versions", "version", "config", "cluster-info", "wait", "auth",
-    "diff", "kustomize", "help", "options", "proxy", "completion",
-    "convert", "events", "can-i", "whoami",
-}
-
-_KUBECTL_WRITE_OPS = {
-    "create", "apply", "edit", "delete", "patch", "replace", "scale",
-    "autoscale", "expose", "run", "exec", "set", "label", "annotate",
-    "taint", "drain", "cordon", "uncordon", "debug", "attach", "cp",
-    "reconcile", "approve", "deny", "certificate",
-}
-
-# rollout sub-commands that are read-only
-_ROLLOUT_READ_ONLY = {"history", "status"}
-
-# Commands that are always blocked regardless of read/write mode
-_BLOCKED_PATTERNS = [
-    ("kubectl edit",         "interactive mode not supported; use 'kubectl get -o yaml' + 'kubectl apply' instead"),
-    ("kubectl port-forward", "port-forward is not supported in unattended mode"),
-    ("kubectl exec -it",     "interactive exec not supported; use 'kubectl exec -- <cmd>' without -it"),
-    ("kubectl exec -ti",     "interactive exec not supported; use 'kubectl exec -- <cmd>' without -ti"),
-    ("kubectl attach",       "interactive attach not supported"),
-]
-
-# Streaming commands that cannot complete in a fixed timeout — always blocked
-_STREAMING_PATTERNS = [
-    (lambda cmd: " get " in cmd and " -w" in cmd,    "watch mode (-w) not supported"),
-    (lambda cmd: " logs " in cmd and " -f" in cmd,   "follow-log mode (-f) not supported; use tail_lines instead"),
-    (lambda cmd: " attach " in cmd,                  "attach is not supported"),
-]
-
-_KUBECTL_TIMEOUT   = int(os.getenv("KUBECTL_TIMEOUT",  "30"))
-_KUBECTL_MAX_OUT   = int(os.getenv("KUBECTL_MAX_CHARS", "8000"))
-_ALLOW_WRITES      = os.getenv("KUBECTL_ALLOW_WRITES", "false").lower() in ("1", "true", "yes")
-
-# ── Locate kubectl binary at module load time ──────────────────────────────────
-# subprocess with shell=True inherits a stripped PATH when run as a service.
-# Probe the most common install locations so we always use the absolute path.
-def _find_kubectl() -> str:
-    """Return the absolute path to kubectl, or just 'kubectl' as a fallback."""
-    # 1. Honour an explicit override
-    explicit = os.getenv("KUBECTL_BIN", "").strip()
-    if explicit:
-        return explicit
-    # 2. Check common install locations
-    for candidate in [
-        "/usr/local/bin/kubectl",
-        "/usr/bin/kubectl",
-        "/opt/homebrew/bin/kubectl",
-        "/snap/bin/kubectl",
-        os.path.expanduser("~/.local/bin/kubectl"),
-        os.path.expanduser("~/bin/kubectl"),
-    ]:
-        if Path(candidate).is_file():
-            _log.info(f"[kubectl] Found at: {candidate}")
-            return candidate
-    # 3. Try PATH lookup (works when PATH is set correctly)
+    """List ALL namespaces — uses the Python k8s client directly against the
+    remote cluster API server. No local kubectl binary required."""
     try:
-        found = subprocess.check_output(
-            ["which", "kubectl"], text=True, timeout=3,
-            stderr=subprocess.DEVNULL
-        ).strip()
-        if found:
-            _log.info(f"[kubectl] Found via which: {found}")
-            return found
-    except Exception:
-        pass
-    _log.warning("[kubectl] Binary not found in common locations — falling back to 'kubectl'")
-    return "kubectl"
+        items, _cont = [], None
+        while True:
+            kw = {"limit": 500}
+            if _cont:
+                kw["_continue"] = _cont
+            page = _core.list_namespace(**kw)
+            items.extend(page.items)
+            _cont = (page.metadata._continue
+                     if page.metadata and page.metadata._continue else None)
+            if not _cont:
+                break
+        if not items:
+            return "No namespaces found."
+        lines = [f"Namespaces (total: {len(items)}):"]
+        for ns in items:
+            lines.append(
+                f"  {ns.metadata.name:<40} {ns.status.phase or 'Unknown'}"
+            )
+        return "\n".join(lines)
+    except ApiException as e:
+        return f"[ERROR] K8s API error listing namespaces: {e.reason}"
 
-_KUBECTL_BIN = _find_kubectl()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KUBECTL_EXEC — pure Python Kubernetes API implementation
+#
+# Replaces the subprocess+binary approach with direct calls to the remote
+# cluster's API server via the kubernetes Python client. No local kubectl
+# binary or PATH configuration required.
+#
+# Supports the full kubectl command surface used by this ops tool:
+#   kubectl get <resource> [-n <ns>|-A] [<name>] [-o yaml|json|wide]
+#   kubectl describe <resource> <name> -n <ns>
+#   kubectl logs <pod> -n <ns> [--tail=N] [-c <container>]
+#   kubectl top nodes / top pods [-n <ns>]
+#   kubectl rollout history/status deployment/<name> -n <ns>
+#   kubectl auth can-i <verb> <resource>
+#   kubectl api-resources
+#   kubectl version
+#   kubectl get events [-n <ns>] [--field-selector=...]
+#   Write ops (apply/delete/patch/scale) blocked unless KUBECTL_ALLOW_WRITES=true
+# ─────────────────────────────────────────────────────────────────────────────
+
+_KUBECTL_MAX_OUT  = int(os.getenv("KUBECTL_MAX_CHARS", "8000"))
+_ALLOW_WRITES     = os.getenv("KUBECTL_ALLOW_WRITES", "false").lower() in ("1", "true", "yes")
+
+_KUBECTL_READ_VERBS  = {
+    "get", "describe", "logs", "top", "rollout", "auth",
+    "api-resources", "api-versions", "version", "cluster-info",
+    "explain", "diff", "events",
+}
+_KUBECTL_WRITE_VERBS = {
+    "apply", "create", "delete", "patch", "replace", "scale",
+    "edit", "label", "annotate", "taint", "drain", "cordon",
+    "uncordon", "set", "run", "expose", "autoscale",
+}
+_BLOCKED_VERBS = {
+    "exec": "exec is not supported; use kubectl logs or describe instead",
+    "port-forward": "port-forward is not supported in unattended mode",
+    "attach": "attach is not supported",
+    "proxy": "proxy is not supported",
+}
 
 
-def _kubectl_modifies_resource(command: str) -> str:
+# ── Resource type → (api_client, list_all_fn, list_ns_fn, get_fn) ────────────
+
+def _get_resource_fns(resource: str):
     """
-    Classify a kubectl command as 'yes' / 'no' / 'unknown' for write impact.
-    Mirrors kubectlModifiesResource() in kubectl_filter.go.
+    Return (list_all_fn, list_ns_fn, get_fn, kind_label) for a resource type.
+    list_all_fn(field_selector) -> items list across all namespaces
+    list_ns_fn(namespace, field_selector) -> items list in one namespace
+    get_fn(name, namespace) -> single object
     """
-    tokens = shlex.split(command) if command.strip() else []
-    # Strip leading env-var assignments / paths
-    kubectl_idx = next((i for i, t in enumerate(tokens)
-                        if os.path.basename(t) == "kubectl"), None)
-    if kubectl_idx is None:
-        return "unknown"
-    sub_tokens = tokens[kubectl_idx + 1:]
-    # Skip flags that precede the sub-command
-    ops = [t for t in sub_tokens if not t.startswith("-")]
-    if not ops:
-        return "unknown"
-    verb = ops[0]
-    if verb in _KUBECTL_READ_ONLY_OPS:
-        # rollout has mixed sub-commands: the sub-verb follows 'rollout'
-        # e.g. "kubectl rollout history deployment/app" → ops = ["rollout", "history", "deployment/app"]
-        if verb == "rollout":
-            # find sub-verb: first token after 'rollout' that doesn't contain '/'
-            sub_ops = [t for t in ops[1:] if "/" not in t]
-            if sub_ops:
-                return "no" if sub_ops[0] in _ROLLOUT_READ_ONLY else "yes"
-            return "unknown"
-        return "no"
-    if verb in _KUBECTL_WRITE_OPS:
-        return "yes"
-    return "unknown"
-
-
-def _validate_kubectl_command(command: str) -> str | None:
-    """
-    Return an error string if the command is blocked, else None.
-    Mirrors validateKubectlCommand() + streaming detection.
-    """
-    cmd_lower = command.lower()
-    for pattern, reason in _BLOCKED_PATTERNS:
-        if pattern in command:
-            return reason
-    for check_fn, reason in _STREAMING_PATTERNS:
-        if check_fn(command):
-            return reason
+    r = resource.lower().rstrip("s")   # crude singularise for matching
+    # pods
+    if r in ("pod", "po"):
+        return (
+            lambda fs="": _paginate(_core.list_pod_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_core.list_namespaced_pod, ns, field_selector=fs),
+            lambda name, ns: _core.read_namespaced_pod(name, ns),
+            "Pod",
+        )
+    # deployments
+    if r in ("deployment", "deploy"):
+        return (
+            lambda fs="": _paginate(_apps.list_deployment_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_apps.list_namespaced_deployment, ns, field_selector=fs),
+            lambda name, ns: _apps.read_namespaced_deployment(name, ns),
+            "Deployment",
+        )
+    # replicasets
+    if r in ("replicaset", "rs"):
+        return (
+            lambda fs="": _paginate(_apps.list_replica_set_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_apps.list_namespaced_replica_set, ns, field_selector=fs),
+            lambda name, ns: _apps.read_namespaced_replica_set(name, ns),
+            "ReplicaSet",
+        )
+    # statefulsets
+    if r in ("statefulset", "sts"):
+        return (
+            lambda fs="": _paginate(_apps.list_stateful_set_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_apps.list_namespaced_stateful_set, ns, field_selector=fs),
+            lambda name, ns: _apps.read_namespaced_stateful_set(name, ns),
+            "StatefulSet",
+        )
+    # daemonsets
+    if r in ("daemonset", "ds"):
+        return (
+            lambda fs="": _paginate(_apps.list_daemon_set_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_apps.list_namespaced_daemon_set, ns, field_selector=fs),
+            lambda name, ns: _apps.read_namespaced_daemon_set(name, ns),
+            "DaemonSet",
+        )
+    # services
+    if r in ("service", "svc"):
+        return (
+            lambda fs="": _paginate(_core.list_service_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_core.list_namespaced_service, ns, field_selector=fs),
+            lambda name, ns: _core.read_namespaced_service(name, ns),
+            "Service",
+        )
+    # configmaps
+    if r in ("configmap", "cm"):
+        return (
+            lambda fs="": _paginate(_core.list_config_map_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_core.list_namespaced_config_map, ns, field_selector=fs),
+            lambda name, ns: _core.read_namespaced_config_map(name, ns),
+            "ConfigMap",
+        )
+    # secrets
+    if r in ("secret",):
+        return (
+            lambda fs="": _paginate(_core.list_secret_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_core.list_namespaced_secret, ns, field_selector=fs),
+            lambda name, ns: _core.read_namespaced_secret(name, ns),
+            "Secret",
+        )
+    # pvcs
+    if r in ("persistentvolumeclaim", "pvc"):
+        return (
+            lambda fs="": _paginate(_core.list_persistent_volume_claim_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_core.list_namespaced_persistent_volume_claim, ns, field_selector=fs),
+            lambda name, ns: _core.read_namespaced_persistent_volume_claim(name, ns),
+            "PersistentVolumeClaim",
+        )
+    # persistent volumes (cluster-scoped)
+    if r in ("persistentvolume", "pv"):
+        return (
+            lambda fs="": _paginate(_core.list_persistent_volume, field_selector=fs),
+            None,   # cluster-scoped, no namespace variant
+            lambda name, ns: _core.read_persistent_volume(name),
+            "PersistentVolume",
+        )
+    # nodes (cluster-scoped)
+    if r in ("node", "no"):
+        return (
+            lambda fs="": _paginate(_core.list_node, field_selector=fs),
+            None,
+            lambda name, ns: _core.read_node(name),
+            "Node",
+        )
+    # namespaces (cluster-scoped)
+    if r in ("namespace", "ns"):
+        return (
+            lambda fs="": _paginate(_core.list_namespace, field_selector=fs),
+            None,
+            lambda name, ns: _core.read_namespace(name),
+            "Namespace",
+        )
+    # jobs
+    if r in ("job",):
+        return (
+            lambda fs="": _paginate(_batch.list_job_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_batch.list_namespaced_job, ns, field_selector=fs),
+            lambda name, ns: _batch.read_namespaced_job(name, ns),
+            "Job",
+        )
+    # cronjobs
+    if r in ("cronjob", "cj"):
+        return (
+            lambda fs="": _paginate(_batch.list_cron_job_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_batch.list_namespaced_cron_job, ns, field_selector=fs),
+            lambda name, ns: _batch.read_namespaced_cron_job(name, ns),
+            "CronJob",
+        )
+    # ingresses
+    if r in ("ingress", "ing"):
+        return (
+            lambda fs="": _paginate(_net.list_ingress_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_net.list_namespaced_ingress, ns, field_selector=fs),
+            lambda name, ns: _net.read_namespaced_ingress(name, ns),
+            "Ingress",
+        )
+    # HPAs
+    if r in ("horizontalpodautoscaler", "hpa"):
+        return (
+            lambda fs="": _paginate(_autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_autoscaling.list_namespaced_horizontal_pod_autoscaler, ns, field_selector=fs),
+            lambda name, ns: _autoscaling.read_namespaced_horizontal_pod_autoscaler(name, ns),
+            "HorizontalPodAutoscaler",
+        )
+    # events
+    if r in ("event", "ev"):
+        return (
+            lambda fs="": _paginate(_core.list_event_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_core.list_namespaced_event, ns, field_selector=fs),
+            lambda name, ns: _core.read_namespaced_event(name, ns),
+            "Event",
+        )
+    # roles / rolebindings / clusterroles
+    if r in ("role",):
+        return (
+            lambda fs="": _paginate(_rbac.list_role_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_rbac.list_namespaced_role, ns, field_selector=fs),
+            lambda name, ns: _rbac.read_namespaced_role(name, ns),
+            "Role",
+        )
+    if r in ("clusterrole",):
+        return (
+            lambda fs="": _paginate(_rbac.list_cluster_role, field_selector=fs),
+            None,
+            lambda name, ns: _rbac.read_cluster_role(name),
+            "ClusterRole",
+        )
+    if r in ("rolebinding",):
+        return (
+            lambda fs="": _paginate(_rbac.list_role_binding_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_rbac.list_namespaced_role_binding, ns, field_selector=fs),
+            lambda name, ns: _rbac.read_namespaced_role_binding(name, ns),
+            "RoleBinding",
+        )
+    if r in ("clusterrolebinding",):
+        return (
+            lambda fs="": _paginate(_rbac.list_cluster_role_binding, field_selector=fs),
+            None,
+            lambda name, ns: _rbac.read_cluster_role_binding(name),
+            "ClusterRoleBinding",
+        )
+    # serviceaccounts
+    if r in ("serviceaccount", "sa"):
+        return (
+            lambda fs="": _paginate(_core.list_service_account_for_all_namespaces, field_selector=fs),
+            lambda ns, fs="": _paginate(_core.list_namespaced_service_account, ns, field_selector=fs),
+            lambda name, ns: _core.read_namespaced_service_account(name, ns),
+            "ServiceAccount",
+        )
+    # CRDs / custom resources — use CustomObjectsApi with group/version/plural
+    # Format: <plural>.<group> e.g. volumes.longhorn.io
+    if "." in resource:
+        parts = resource.split(".", 1)
+        plural, group = parts[0], parts[1]
+        custom = _k8s.CustomObjectsApi()
+        # Try to determine version from CRD metadata
+        version = _resolve_crd_version(group, plural)
+        return (
+            lambda fs="", _p=plural, _g=group, _v=version: _list_custom_all(_p, _g, _v),
+            lambda ns, fs="", _p=plural, _g=group, _v=version: _list_custom_ns(ns, _p, _g, _v),
+            lambda name, ns, _p=plural, _g=group, _v=version: _get_custom(name, ns, _p, _g, _v),
+            resource,
+        )
     return None
 
 
+def _paginate(list_fn, *args, field_selector="", **kwargs):
+    """Call list_fn with automatic pagination, return all items."""
+    items, _cont = [], None
+    while True:
+        kw = {"limit": 500, **kwargs}
+        if field_selector:
+            kw["field_selector"] = field_selector
+        if _cont:
+            kw["_continue"] = _cont
+        if args:
+            page = list_fn(*args, **kw)
+        else:
+            page = list_fn(**kw)
+        items.extend(page.items)
+        _cont = (page.metadata._continue
+                 if page.metadata and page.metadata._continue else None)
+        if not _cont:
+            break
+    return items
+
+
+def _resolve_crd_version(group: str, plural: str) -> str:
+    """Look up the stored version for a CRD from the API server."""
+    try:
+        ext = _k8s.ApiextensionsV1Api()
+        # CRD names are plural.group
+        crd = ext.read_custom_resource_definition(f"{plural}.{group}")
+        # Prefer the first storage version
+        for v in crd.spec.versions:
+            if v.storage:
+                return v.name
+        return crd.spec.versions[0].name
+    except Exception:
+        return "v1"   # reasonable fallback for most Longhorn/common CRDs
+
+
+def _list_custom_all(plural: str, group: str, version: str) -> list:
+    custom = _k8s.CustomObjectsApi()
+    try:
+        resp = custom.list_cluster_custom_object(group, version, plural)
+        return resp.get("items", [])
+    except Exception:
+        return []
+
+
+def _list_custom_ns(ns: str, plural: str, group: str, version: str) -> list:
+    custom = _k8s.CustomObjectsApi()
+    try:
+        resp = custom.list_namespaced_custom_object(group, version, ns, plural)
+        return resp.get("items", [])
+    except Exception:
+        return []
+
+
+def _get_custom(name: str, ns: str, plural: str, group: str, version: str) -> dict:
+    custom = _k8s.CustomObjectsApi()
+    if ns:
+        return custom.get_namespaced_custom_object(group, version, ns, plural, name)
+    return custom.get_cluster_custom_object(group, version, plural, name)
+
+
+# ── Command parser ─────────────────────────────────────────────────────────────
+
+def _parse_kubectl(command: str) -> dict:
+    """
+    Parse a kubectl command string into a structured dict.
+    Returns keys: verb, resource, name, namespace, all_namespaces,
+                  output_format, field_selector, tail, container,
+                  subcommand, args, flags
+    """
+    tokens = shlex.split(command.strip())
+    # Drop leading 'kubectl'
+    if tokens and tokens[0] == "kubectl":
+        tokens = tokens[1:]
+
+    result = {
+        "verb": "",
+        "resource": "",
+        "name": "",
+        "namespace": "default",
+        "all_namespaces": False,
+        "output_format": "",
+        "field_selector": "",
+        "tail": 100,
+        "container": "",
+        "subcommand": "",
+        "args": [],
+        "flags": {},
+    }
+
+    if not tokens:
+        return result
+
+    result["verb"] = tokens[0]
+    tokens = tokens[1:]
+
+    i = 0
+    positional = []
+    while i < len(tokens):
+        t = tokens[i]
+        if t in ("-n", "--namespace") and i + 1 < len(tokens):
+            result["namespace"] = tokens[i + 1]; i += 2
+        elif t.startswith("--namespace="):
+            result["namespace"] = t.split("=", 1)[1]; i += 1
+        elif t.startswith("-n") and len(t) > 2:
+            result["namespace"] = t[2:]; i += 1
+        elif t in ("-A", "--all-namespaces"):
+            result["all_namespaces"] = True; i += 1
+        elif t in ("-o", "--output") and i + 1 < len(tokens):
+            result["output_format"] = tokens[i + 1]; i += 2
+        elif t.startswith("--output=") or t.startswith("-o"):
+            result["output_format"] = t.split("=", 1)[-1].lstrip("-o"); i += 1
+        elif t.startswith("--field-selector="):
+            result["field_selector"] = t.split("=", 1)[1]; i += 1
+        elif t == "--field-selector" and i + 1 < len(tokens):
+            result["field_selector"] = tokens[i + 1]; i += 2
+        elif t.startswith("--tail="):
+            try: result["tail"] = int(t.split("=")[1])
+            except ValueError: pass
+            i += 1
+        elif t in ("-c", "--container") and i + 1 < len(tokens):
+            result["container"] = tokens[i + 1]; i += 2
+        elif t.startswith("--container="):
+            result["container"] = t.split("=", 1)[1]; i += 1
+        elif t.startswith("--no-headers") or t in ("--show-kind", "--show-labels"):
+            i += 1   # silently consume display flags
+        elif t.startswith("-"):
+            # Consume unknown flags and optional values
+            if i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+                result["flags"][t] = tokens[i + 1]; i += 2
+            else:
+                result["flags"][t] = True; i += 1
+        else:
+            positional.append(t); i += 1
+
+    result["args"] = positional
+    if positional:
+        result["resource"] = positional[0]
+        if len(positional) >= 2:
+            result["name"] = positional[1]
+        if len(positional) >= 3:
+            result["subcommand"] = positional[2]
+    return result
+
+
+# ── Formatters ─────────────────────────────────────────────────────────────────
+
+def _fmt_pod(p) -> str:
+    ns   = p.metadata.namespace or ""
+    name = p.metadata.name
+    phase = (p.status.phase or "Unknown")
+    ready_cs = p.status.container_statuses or []
+    ready    = sum(1 for c in ready_cs if c.ready)
+    total    = len(ready_cs) or len(p.spec.containers or [])
+    restarts = sum(c.restart_count or 0 for c in ready_cs)
+    node     = p.spec.node_name or "<none>"
+    age      = _age(p.metadata.creation_timestamp)
+    if ns:
+        return f"{ns:<30} {name:<50} {ready}/{total}  {restarts:<6} {phase:<12} {node:<30} {age}"
+    return f"{name:<50} {ready}/{total}  {restarts:<6} {phase:<12} {node:<30} {age}"
+
+
+def _fmt_node(n) -> str:
+    name  = n.metadata.name
+    role  = ",".join(k.split("/")[-1] for k in (n.metadata.labels or {})
+                     if "node-role.kubernetes.io" in k) or "worker"
+    conds = {c.type: c.status for c in (n.status.conditions or [])}
+    ready = "Ready" if conds.get("Ready") == "True" else "NotReady"
+    age   = _age(n.metadata.creation_timestamp)
+    ver   = n.status.node_info.kubelet_version if n.status and n.status.node_info else ""
+    return f"{name:<40} {role:<20} {ready:<10} {age:<10} {ver}"
+
+
+def _fmt_deployment(d) -> str:
+    ns    = d.metadata.namespace or ""
+    name  = d.metadata.name
+    desired   = d.spec.replicas or 0
+    ready_r   = d.status.ready_replicas or 0
+    available = d.status.available_replicas or 0
+    age   = _age(d.metadata.creation_timestamp)
+    if ns:
+        return f"{ns:<30} {name:<50} {ready_r}/{desired}  available={available}  {age}"
+    return f"{name:<50} {ready_r}/{desired}  available={available}  {age}"
+
+
+def _age(ts) -> str:
+    if not ts:
+        return "<unknown>"
+    import datetime
+    try:
+        now  = datetime.datetime.now(datetime.timezone.utc)
+        diff = now - ts
+        s    = int(diff.total_seconds())
+        if s < 60:    return f"{s}s"
+        if s < 3600:  return f"{s//60}m"
+        if s < 86400: return f"{s//3600}h"
+        return f"{s//86400}d"
+    except Exception:
+        return "<unknown>"
+
+
+def _obj_to_yaml(obj) -> str:
+    """Convert a kubernetes client object to a YAML string."""
+    try:
+        d = _k8s.ApiClient().sanitize_for_serialization(obj)
+        return _yaml.dump(d, default_flow_style=False, allow_unicode=True)
+    except Exception:
+        return str(obj)
+
+
+def _obj_to_table(items, kind: str) -> str:
+    """Format a list of k8s objects into a human-readable table."""
+    if not items:
+        return f"No {kind} resources found."
+    lines = []
+    k = kind.lower()
+    if k == "pod":
+        # Check if namespaced
+        ns_col = any(getattr(p.metadata, "namespace", None) for p in items)
+        if ns_col:
+            lines.append(f"{'NAMESPACE':<30} {'NAME':<50} {'READY':<8} {'RESTARTS':<8} {'STATUS':<12} {'NODE':<30} {'AGE'}")
+        else:
+            lines.append(f"{'NAME':<50} {'READY':<8} {'RESTARTS':<8} {'STATUS':<12} {'NODE':<30} {'AGE'}")
+        for p in items:
+            lines.append(_fmt_pod(p))
+    elif k in ("deployment",):
+        lines.append(f"{'NAMESPACE':<30} {'NAME':<50} {'READY':<8} {'AVAILABLE':<12} {'AGE'}")
+        for d in items:
+            lines.append(_fmt_deployment(d))
+    elif k == "node":
+        lines.append(f"{'NAME':<40} {'ROLES':<20} {'STATUS':<10} {'AGE':<10} {'VERSION'}")
+        for n in items:
+            lines.append(_fmt_node(n))
+    elif k in ("namespace",):
+        lines.append(f"{'NAME':<40} {'STATUS':<12} {'AGE'}")
+        for ns in items:
+            lines.append(f"  {ns.metadata.name:<40} {ns.status.phase or '':<12} {_age(ns.metadata.creation_timestamp)}")
+    elif k == "event":
+        lines.append(f"{'NAMESPACE':<25} {'LAST SEEN':<12} {'TYPE':<10} {'REASON':<25} {'OBJECT':<40} {'MESSAGE'}")
+        for ev in items:
+            obj_ref = f"{(ev.involved_object.kind or '').lower()}/{ev.involved_object.name or ''}"
+            lines.append(
+                f"  {ev.metadata.namespace or '':<25} "
+                f"{_age(ev.last_timestamp or ev.first_timestamp or ev.metadata.creation_timestamp):<12} "
+                f"{ev.type or '':<10} {ev.reason or '':<25} {obj_ref:<40} "
+                f"{(ev.message or '')[:80]}"
+            )
+    else:
+        # Generic: name + namespace + age
+        has_ns = any(getattr(i.metadata, "namespace", None) for i in items)
+        if has_ns:
+            lines.append(f"{'NAMESPACE':<30} {'NAME':<50} {'AGE'}")
+            for item in items:
+                lines.append(f"  {item.metadata.namespace or '':<30} {item.metadata.name:<50} {_age(item.metadata.creation_timestamp)}")
+        else:
+            lines.append(f"{'NAME':<50} {'AGE'}")
+            for item in items:
+                lines.append(f"  {item.metadata.name:<50} {_age(item.metadata.creation_timestamp)}")
+    return "\n".join(lines)
+
+
+def _custom_to_table(items: list, kind: str) -> str:
+    """Format a list of custom resource dicts into a table."""
+    if not items:
+        return f"No {kind} resources found."
+    lines = []
+    has_ns = any(i.get("metadata", {}).get("namespace") for i in items)
+    if has_ns:
+        lines.append(f"{'NAMESPACE':<30} {'NAME':<50} {'AGE'}")
+        for item in items:
+            meta = item.get("metadata", {})
+            from datetime import datetime, timezone
+            try:
+                ts_str = meta.get("creationTimestamp")
+                if ts_str:
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    age = _age(ts)
+                else:
+                    age = "<unknown>"
+            except Exception:
+                age = "<unknown>"
+            ns = meta.get("namespace", "")
+            name = meta.get("name", "")
+            # Include spec/status summary if available
+            status = item.get("status", {})
+            state  = status.get("state", status.get("phase", status.get("robustness", "")))
+            suffix = f"  state={state}" if state else ""
+            lines.append(f"  {ns:<30} {name:<50} {age}{suffix}")
+    else:
+        lines.append(f"{'NAME':<50} {'AGE'}")
+        for item in items:
+            meta = item.get("metadata", {})
+            lines.append(f"  {meta.get('name', ''):<50} <n/a>")
+    return "\n".join(lines)
+
+
+# ── Verb handlers ─────────────────────────────────────────────────────────────
+
+def _handle_get(p: dict) -> str:
+    resource = p["resource"]
+    name     = p["name"]
+    ns       = p["namespace"]
+    all_ns   = p["all_namespaces"]
+    fmt      = p["output_format"]
+    fs       = p["field_selector"]
+
+    fns = _get_resource_fns(resource)
+    if fns is None:
+        return f"[ERROR] Unsupported resource type: {resource!r}. Use get_pod_status, get_node_health, or other specific tools."
+
+    list_all, list_ns, get_one, kind = fns
+
+    try:
+        if name:
+            obj = get_one(name, ns)
+            if fmt in ("yaml", "-oyaml"):
+                return _obj_to_yaml(obj)
+            if fmt in ("json", "-ojson"):
+                d = _k8s.ApiClient().sanitize_for_serialization(obj)
+                return _json.dumps(d, indent=2)
+            # Default: YAML is most useful for a single object
+            return _obj_to_yaml(obj)
+
+        if all_ns or list_ns is None:
+            items = list_all(fs)
+        else:
+            items = list_ns(ns, fs)
+
+        if fmt in ("yaml", "-oyaml"):
+            d = [_k8s.ApiClient().sanitize_for_serialization(o) for o in items]
+            return _yaml.dump(d, default_flow_style=False, allow_unicode=True)
+        if fmt in ("json", "-ojson"):
+            d = [_k8s.ApiClient().sanitize_for_serialization(o) for o in items]
+            return _json.dumps(d, indent=2)
+
+        # Check if custom resource (items are dicts, not k8s objects)
+        if items and isinstance(items[0], dict):
+            return _custom_to_table(items, kind)
+        return _obj_to_table(items, kind)
+
+    except ApiException as e:
+        return f"[ERROR] API error getting {resource}: {e.reason} (status {e.status})"
+
+
+def _handle_describe(p: dict) -> str:
+    resource = p["resource"]
+    name     = p["name"]
+    ns       = p["namespace"]
+
+    fns = _get_resource_fns(resource)
+    if fns is None:
+        return f"[ERROR] Unsupported resource type: {resource!r}"
+
+    _, _, get_one, kind = fns
+    try:
+        obj = get_one(name or "", ns)
+        return _obj_to_yaml(obj)
+    except ApiException as e:
+        return f"[ERROR] API error describing {resource}/{name}: {e.reason}"
+
+
+def _handle_logs(p: dict) -> str:
+    pod_ref = p["resource"]   # may be pod/name or just name (first positional)
+    if "/" in pod_ref:
+        pod_name = pod_ref.split("/", 1)[1]
+    else:
+        pod_name = pod_ref
+    ns        = p["namespace"]
+    tail      = p["tail"]
+    container = p["container"] or None
+    try:
+        kw: dict = {"tail_lines": tail}
+        if container:
+            kw["container"] = container
+        logs = _core.read_namespaced_pod_log(pod_name, ns, **kw)
+        return logs or "(empty log)"
+    except ApiException as e:
+        return f"[ERROR] Cannot get logs for {pod_name} in {ns}: {e.reason}"
+
+
+def _handle_top(p: dict) -> str:
+    resource = p["resource"]
+    ns       = p["namespace"]
+    all_ns   = p["all_namespaces"]
+    try:
+        custom = _k8s.CustomObjectsApi()
+        if resource in ("node", "nodes", "no"):
+            resp = custom.list_cluster_custom_object(
+                "metrics.k8s.io", "v1beta1", "nodes"
+            )
+            lines = [f"{'NODE':<40} {'CPU':<12} {'MEMORY'}"]
+            for item in resp.get("items", []):
+                lines.append(
+                    f"  {item['metadata']['name']:<40} "
+                    f"{item['usage']['cpu']:<12} "
+                    f"{item['usage']['memory']}"
+                )
+            return "\n".join(lines)
+        else:   # pods
+            if all_ns:
+                resp = custom.list_cluster_custom_object(
+                    "metrics.k8s.io", "v1beta1", "pods"
+                )
+                items = resp.get("items", [])
+            else:
+                resp = custom.list_namespaced_custom_object(
+                    "metrics.k8s.io", "v1beta1", ns, "pods"
+                )
+                items = resp.get("items", [])
+            lines = [f"{'NAMESPACE':<30} {'POD':<50} {'CPU':<12} {'MEMORY'}"]
+            for item in items:
+                meta = item["metadata"]
+                containers = item.get("containers", [])
+                cpu = sum(
+                    int(c["usage"]["cpu"].rstrip("n")) for c in containers
+                    if c["usage"].get("cpu", "").endswith("n")
+                )
+                mem = containers[0]["usage"].get("memory", "?") if containers else "?"
+                lines.append(
+                    f"  {meta.get('namespace',''):<30} {meta['name']:<50} "
+                    f"{cpu}n{'':6} {mem}"
+                )
+            return "\n".join(lines)
+    except ApiException as e:
+        return f"[ERROR] Metrics not available: {e.reason}. Is metrics-server installed?"
+
+
+def _handle_rollout(p: dict) -> str:
+    subverb  = p["args"][1] if len(p["args"]) > 1 else p["subcommand"]
+    ref      = p["args"][2] if len(p["args"]) > 2 else ""
+    ns       = p["namespace"]
+    # ref may be "deployment/myapp" or just "myapp"
+    if "/" in ref:
+        _, name = ref.split("/", 1)
+    else:
+        name = ref or (p["name"] or "")
+    try:
+        d = _apps.read_namespaced_deployment(name, ns)
+        if subverb == "status":
+            ready     = d.status.ready_replicas or 0
+            desired   = d.spec.replicas or 0
+            available = d.status.available_replicas or 0
+            updated   = d.status.updated_replicas or 0
+            if ready == desired == available == updated:
+                return f"deployment \"/{name}\" successfully rolled out ({ready}/{desired} ready)"
+            return (
+                f"Waiting: desired={desired} updated={updated} "
+                f"available={available} ready={ready}"
+            )
+        elif subverb == "history":
+            rev = d.metadata.annotations.get("deployment.kubernetes.io/revision", "?")
+            return (
+                f"deployment.apps/{name}\n"
+                f"REVISION  CHANGE-CAUSE\n"
+                f"{rev}         <none>\n"
+                f"(Full history requires kubectl-based access with --record flag history)"
+            )
+        return f"[ERROR] rollout sub-command {subverb!r} not supported. Use: status, history"
+    except ApiException as e:
+        return f"[ERROR] rollout {subverb} {name}: {e.reason}"
+
+
+def _handle_auth_cani(p: dict) -> str:
+    args = p["args"]
+    # kubectl auth can-i <verb> <resource>
+    if len(args) < 3:
+        return "[ERROR] Usage: kubectl auth can-i <verb> <resource>"
+    verb     = args[1]
+    resource = args[2]
+    ns       = p["namespace"]
+    try:
+        auth = _k8s.AuthorizationV1Api()
+        review = auth.create_self_subject_access_review(
+            body=_k8s.V1SelfSubjectAccessReview(
+                spec=_k8s.V1SelfSubjectAccessReviewSpec(
+                    resource_attributes=_k8s.V1ResourceAttributes(
+                        namespace=ns, verb=verb, resource=resource
+                    )
+                )
+            )
+        )
+        allowed = review.status.allowed
+        return f"{'yes' if allowed else 'no'} — {verb} {resource} in {ns}"
+    except ApiException as e:
+        return f"[ERROR] auth can-i failed: {e.reason}"
+
+
+def _handle_api_resources() -> str:
+    try:
+        # Use the discovery client
+        api_client = _k8s.ApiClient()
+        resources_v1 = api_client.call_api(
+            "/api/v1", "GET", response_type="object", auth_settings=["BearerToken"]
+        )[0]
+        lines = ["NAME                  SHORTNAMES  APIVERSION  NAMESPACED  KIND"]
+        if isinstance(resources_v1, dict):
+            for r in resources_v1.get("resources", []):
+                if "/" not in r.get("name", ""):
+                    lines.append(
+                        f"  {r.get('name',''):<22} {','.join(r.get('shortNames',[])):<12} "
+                        f"v1{'':10} {str(r.get('namespaced','')).lower():<12} {r.get('kind','')}"
+                    )
+        return "\n".join(lines[:60])   # cap to avoid LLM overload
+    except Exception as e:
+        return f"[ERROR] api-resources: {e}"
+
+
+def _handle_version() -> str:
+    try:
+        v = _k8s.VersionApi().get_code()
+        return (
+            f"Server Version: {v.git_version}\n"
+            f"  Platform: {v.platform}\n"
+            f"  Go: {v.go_version}"
+        )
+    except ApiException as e:
+        return f"[ERROR] version: {e.reason}"
+
+
+# ── Main kubectl_exec entry point ──────────────────────────────────────────────
+
 def kubectl_exec(command: str) -> str:
     """
-    Execute a kubectl command against the cluster and return its output.
+    Execute a kubectl command against the remote cluster using the Kubernetes
+    Python API client. No local kubectl binary required — all calls go directly
+    to the cluster API server over HTTPS using the credentials in KUBECONFIG.
 
-    Implements the kubectl-ai execution model:
-      • Dangerous / interactive commands are rejected before execution.
-      • Write operations are blocked unless KUBECTL_ALLOW_WRITES=true.
-      • KUBECONFIG is injected from KUBECONFIG_PATH env var.
-      • Execution is time-bounded (KUBECTL_TIMEOUT seconds, default 30).
-      • Stdout + stderr are merged and truncated to KUBECTL_MAX_CHARS chars.
+    Supports:
+      kubectl get <resource> [-n ns | -A] [name] [-o yaml|json]
+      kubectl describe <resource> <name> -n <ns>
+      kubectl logs <pod> -n <ns> [--tail=N] [-c container]
+      kubectl top nodes | top pods [-n ns | -A]
+      kubectl rollout history|status deployment/<name> -n <ns>
+      kubectl auth can-i <verb> <resource> [-n ns]
+      kubectl api-resources
+      kubectl version
+      Write operations (apply/delete/patch/scale) blocked unless
+        KUBECTL_ALLOW_WRITES=true (not yet implemented — raise clearly)
 
     Parameters
     ----------
     command : str
-        The full kubectl command string, e.g. ``kubectl get pods -n default``.
-        Must begin with ``kubectl``.
+        Full kubectl command string, e.g. ``kubectl get pods -n vault-system``.
 
     Returns
     -------
     str
-        Command output, or an error message prefixed with ``[ERROR]``.
+        Formatted output, or ``[ERROR] ...`` on failure.
     """
     command = command.strip()
+    _log.info(f"[kubectl_exec] {command!r}")
 
-    # ── 1. Must start with kubectl ────────────────────────────────────────────
-    if not re.match(r"^(sudo\s+)?kubectl(\s|$)", command):
-        return "[ERROR] kubectl_exec only runs kubectl commands. Command must start with 'kubectl'."
+    if not re.match(r"^kubectl(\s|$)", command):
+        return "[ERROR] Command must start with 'kubectl'."
 
-    # ── 2. Validate: blocked / streaming ─────────────────────────────────────
-    err = _validate_kubectl_command(command)
-    if err:
-        return f"[ERROR] Command not allowed: {err}"
+    p = _parse_kubectl(command)
+    verb = p["verb"]
 
-    # ── 3. Write-protection ───────────────────────────────────────────────────
-    if not _ALLOW_WRITES and _kubectl_modifies_resource(command) == "yes":
+    # ── Blocked verbs ────────────────────────────────────────────────────────
+    if verb in _BLOCKED_VERBS:
+        return f"[ERROR] {_BLOCKED_VERBS[verb]}"
+
+    # ── Write protection ─────────────────────────────────────────────────────
+    if verb in _KUBECTL_WRITE_VERBS and not _ALLOW_WRITES:
         return (
-            "[ERROR] Write operations are disabled (KUBECTL_ALLOW_WRITES is not set). "
-            "This tool is read-only by default. If you need to make changes, ask the "
-            "operator to set KUBECTL_ALLOW_WRITES=true."
+            f"[ERROR] Write operation '{verb}' is disabled. "
+            "Set KUBECTL_ALLOW_WRITES=true in your env file to enable writes."
         )
 
-    # ── 4. Build environment with KUBECONFIG + expanded PATH ─────────────────
-    env = os.environ.copy()
-    # Ensure common binary locations are in PATH for any shell operators (||, |)
-    extra_paths = "/usr/local/bin:/usr/bin:/opt/homebrew/bin:/snap/bin"
-    env["PATH"] = extra_paths + ":" + env.get("PATH", "")
-    kc_path = os.getenv("KUBECONFIG_PATH", "")
-    if kc_path:
-        expanded = os.path.expanduser(kc_path)
-        if Path(expanded).exists():
-            env["KUBECONFIG"] = expanded
-
-    # ── 5. Rewrite command to use absolute kubectl path ───────────────────────
-    # Replace leading 'kubectl' token with the resolved absolute path so the
-    # command works even when the service PATH doesn't include kubectl's directory.
-    abs_command = re.sub(r'^(sudo\s+)?kubectl\b',
-                         lambda m: (m.group(1) or '') + _KUBECTL_BIN,
-                         command, count=1)
-
-    # ── 6. Execute ────────────────────────────────────────────────────────────
-    _log.info(f"[kubectl_exec] Running: {abs_command!r}")
+    # ── Route to handler ─────────────────────────────────────────────────────
     try:
-        result = subprocess.run(
-            abs_command, shell=True, capture_output=True, text=True,
-            env=env, timeout=_KUBECTL_TIMEOUT,
-        )
-        stdout = result.stdout or ""
-        stderr = result.stderr or ""
-        combined = (stdout + ("\n" + stderr if stderr.strip() else "")).strip()
-
-        if result.returncode != 0 and not combined:
-            combined = f"[exit {result.returncode}] (no output)"
-        elif result.returncode != 0:
-            combined = f"[exit {result.returncode}]\n{combined}"
-
-        # Truncate to protect LLM context window
-        if len(combined) > _KUBECTL_MAX_OUT:
-            combined = combined[:_KUBECTL_MAX_OUT] + f"\n...[output truncated at {_KUBECTL_MAX_OUT} chars]"
-
-        return combined or "(empty output)"
-
-    except subprocess.TimeoutExpired:
-        return f"[ERROR] Command timed out after {_KUBECTL_TIMEOUT}s: {command}"
-    except FileNotFoundError:
-        return "[ERROR] 'kubectl' binary not found. Ensure kubectl is installed and on PATH."
+        if verb == "get":
+            out = _handle_get(p)
+        elif verb == "describe":
+            out = _handle_describe(p)
+        elif verb == "logs":
+            out = _handle_logs(p)
+        elif verb == "top":
+            out = _handle_top(p)
+        elif verb == "rollout":
+            out = _handle_rollout(p)
+        elif verb == "auth":
+            out = _handle_auth_cani(p)
+        elif verb == "api-resources":
+            out = _handle_api_resources()
+        elif verb == "version":
+            out = _handle_version()
+        elif verb in _KUBECTL_READ_VERBS:
+            out = f"[ERROR] kubectl {verb} is not yet implemented in API mode. Use a specific tool instead."
+        else:
+            out = f"[ERROR] Unknown kubectl verb: {verb!r}"
     except Exception as exc:
         _log.exception(f"[kubectl_exec] Unexpected error: {exc}")
-        return f"[ERROR] Unexpected error: {exc}"
+        out = f"[ERROR] Unexpected error: {exc}"
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TOOL REGISTRY
-# Add entries here to expose a function to the LLM agent.
-# ─────────────────────────────────────────────────────────────────────────────
+    # ── Truncate ─────────────────────────────────────────────────────────────
+    if len(out) > _KUBECTL_MAX_OUT:
+        out = out[:_KUBECTL_MAX_OUT] + f"\n...[output truncated at {_KUBECTL_MAX_OUT} chars]"
+    return out
 
 K8S_TOOLS: dict = {
 
@@ -960,13 +1573,13 @@ K8S_TOOLS: dict = {
 K8S_TOOLS["kubectl_exec"] = {
     "fn":          kubectl_exec,
     "description": (
-        "Execute any kubectl command against the cluster. "
-        "Use for operations not covered by other tools: custom resources (CRDs), "
-        "Longhorn volumes/replicas/engines, rollout history/status, top nodes/pods, "
-        "auth can-i, api-resources, diff, and ad-hoc read-only diagnostics. "
-        "WRITE commands (apply, delete, patch, scale, etc.) are blocked unless "
-        "KUBECTL_ALLOW_WRITES=true is set by the operator. "
-        "Interactive commands (exec -it, logs -f, port-forward) are always blocked. "
+        "Execute a kubectl-style command against the remote cluster. "
+        "Uses the Kubernetes Python API client directly — no local kubectl binary needed. "
+        "Use for: custom resources (CRDs) like Longhorn volumes/replicas/engines, "
+        "rollout history/status, top nodes/pods (requires metrics-server), "
+        "auth can-i, api-resources, version, and ad-hoc diagnostics. "
+        "Supported verbs: get, describe, logs, top, rollout, auth, api-resources, version. "
+        "Write commands (apply/delete/patch/scale) blocked unless KUBECTL_ALLOW_WRITES=true. "
         "Always prefix the command with 'kubectl'."
     ),
     "parameters": {
@@ -974,12 +1587,15 @@ K8S_TOOLS["kubectl_exec"] = {
             "type": "string",
             "description": (
                 "Full kubectl command starting with 'kubectl'. "
-                "Examples: 'kubectl get pods -A', "
-                "'kubectl describe node worker-1', "
+                "Examples: "
+                "'kubectl get pods -n vault-system', "
                 "'kubectl get volumes.longhorn.io -n longhorn-system', "
-                "'kubectl rollout history deployment/myapp -n prod', "
+                "'kubectl describe node worker-1', "
+                "'kubectl logs mypod-xyz -n default --tail=50', "
+                "'kubectl rollout status deployment/myapp -n prod', "
                 "'kubectl top nodes', "
-                "'kubectl auth can-i list pods --as system:serviceaccount:default:mysa'"
+                "'kubectl auth can-i list pods -n default', "
+                "'kubectl get namespaces -A'"
             ),
         },
     },
