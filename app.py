@@ -590,21 +590,35 @@ ENVIRONMENT CONTEXT:
   Common Longhorn issues: replica rebuilding, volume degraded, node disk pressure, engine image upgrades.
 - Default storage class: 'longhorn'.
 
+TOOL USE — MANDATORY:
+You have access to live Kubernetes tools. You MUST call them to answer questions.
+DO NOT list kubectl commands. DO NOT explain what you would do. DO NOT say "I would run...".
+INSTEAD: call the appropriate tool immediately, then report what it returned.
+
+Available tools and when to use them:
+- get_node_health          → always call for cluster health or node questions
+- get_pod_status           → always call for pod/workload health (use namespace="all")
+- get_events               → always call for warning events or crashloops
+- get_deployment_status    → call for deployment replica issues
+- get_pod_logs             → call when a specific pod name is known and logs are needed
+- describe_pod             → call for detailed diagnosis of a specific pod
+- search_documentation     → call to cross-reference known issues and runbooks
+{rag_instruction}
+
 CRITICAL RULES:
-1. NEVER fabricate data — only report what tools actually returned.
-2. Cite the tool result you are reasoning from.
+1. ALWAYS call tools first — never answer from memory alone.
+2. NEVER fabricate data — only report what tools actually returned.
 3. Be specific — name the exact pod, node, or deployment with the issue.
 4. NEVER suggest write operations (restart, delete, scale) — diagnose only.
-5. When asked about cluster health, ALWAYS scan ALL namespaces (namespace='all').
+5. When asked about cluster health, call get_node_health AND get_pod_status AND get_events.
 6. For storage issues, ALWAYS check longhorn-system namespace.
-{rag_instruction}
 
 SITE-SPECIFIC RULES:
 {custom_rules}
 
 RESPONSE FORMAT:
 - Concise bullet points only. No lengthy paragraphs.
-- State what you found, what it means, what to do — nothing more.
+- State what you found (from tool results), what it means, what to investigate next.
 - Skip sections with nothing to report.
 - Max ~300 words unless genuinely complex.
 """
@@ -731,13 +745,68 @@ def build_agent():
         "search_documentation":  "📚 Searching knowledge base",
     }
 
+    # ── Default tool calls for common queries when model skips tool calling ──
+    QUERY_DEFAULTS = [
+        (["health","status","check","overview","summary","problem","issue"],
+         [("get_node_health",{}), ("get_pod_status",{"namespace":"all"}), ("get_events",{"namespace":"all"})]),
+        (["pod","crash","restart","oomkill","pending","failed"],
+         [("get_pod_status",{"namespace":"all"}), ("get_events",{"namespace":"all"})]),
+        (["node","pressure","memory","disk","resource"],
+         [("get_node_health",{}), ("get_events",{"namespace":"all"})]),
+        (["deploy","deployment","replica","rollout"],
+         [("get_deployment_status",{"namespace":"all"}), ("get_pod_status",{"namespace":"all"})]),
+        (["event","warning","alert"],
+         [("get_events",{"namespace":"all","warning_only":False})]),
+        (["longhorn","storage","volume","pvc","pv"],
+         [("get_pod_status",{"namespace":"longhorn-system"}), ("get_events",{"namespace":"longhorn-system"})]),
+        (["log"],
+         [("get_pod_status",{"namespace":"all"}), ("get_events",{"namespace":"all"})]),
+    ]
+
+    def _default_tools_for(user_msg: str):
+        """Return fallback tool calls when model does not emit any."""
+        lm = user_msg.lower()
+        for keywords, calls in QUERY_DEFAULTS:
+            if any(k in lm for k in keywords):
+                return calls
+        return [("get_node_health",{}), ("get_pod_status",{"namespace":"all"})]
+
     def llm_node(state: AgentState):
         itr     = state.get("iteration", 0) + 1
         updates = list(state.get("status_updates", []))
         updates.append(f"🧠 Reasoning… (iteration {itr})" if itr == 1
                        else f"🔄 Synthesising findings… (iteration {itr})")
-        response = llm.invoke([SystemMessage(content=prompt)] + state["messages"])
-        tcs      = getattr(response, "tool_calls", [])
+        messages = [SystemMessage(content=prompt)] + state["messages"]
+        response = llm.invoke(messages)
+        tcs      = getattr(response, "tool_calls", []) or []
+
+        # ── Fallback: if model returned NO tool calls on iteration 1,
+        #    inject default tool calls based on the user query ──────────────
+        if not tcs and itr == 1:
+            user_msg = ""
+            for m in reversed(state["messages"]):
+                if hasattr(m, "type") and m.type == "human":
+                    user_msg = m.content; break
+                elif isinstance(m, HumanMessage):
+                    user_msg = m.content; break
+            default_calls = _default_tools_for(user_msg)
+            _log_ag.info(f"[agent] Model returned no tool calls — injecting defaults: "
+                         f"{[n for n,_ in default_calls]}")
+            # Build synthetic tool_calls on the response so router sends to tool_node
+            import uuid
+            synthetic_tcs = []
+            for tname, targs in default_calls:
+                if tname in tool_map:
+                    synthetic_tcs.append({
+                        "name": tname, "args": targs,
+                        "id": f"auto_{uuid.uuid4().hex[:8]}",
+                        "type": "tool_call",
+                    })
+            if synthetic_tcs:
+                response.tool_calls = synthetic_tcs
+                tcs = synthetic_tcs
+                updates.append("⚙️  Auto-invoking live cluster tools…")
+
         if tcs:
             updates.append(f"🔧 Calling: {', '.join(tc['name'] for tc in tcs)}")
         return {"messages":[response], "tool_calls_made":state.get("tool_calls_made",[]),
@@ -748,8 +817,9 @@ def build_agent():
         results      = []
         tools_called = list(state.get("tool_calls_made", []))
         updates      = list(state.get("status_updates", []))
-        for tc in last.tool_calls:
-            name = tc["name"]; args = tc["args"]
+        tcs          = getattr(last, "tool_calls", []) or []
+        for tc in tcs:
+            name = tc["name"]; args = tc.get("args", {})
             tools_called.append(name)
             label = TOOL_LABELS.get(name, f"⚙️ {name}")
             ns    = args.get("namespace","")
@@ -757,7 +827,7 @@ def build_agent():
             updates.append(label)
             try:
                 fn  = tool_map.get(name)
-                out = fn.invoke(json.dumps(args) if args else {}) if fn else f"Tool '{name}' not found."
+                out = fn.invoke(json.dumps(args) if args else "{}") if fn else f"Tool '{name}' not found."
             except Exception as e:
                 out = f"Tool '{name}' failed: {e}"
             results.append(ToolMessage(content=str(out), tool_call_id=tc["id"]))
@@ -767,7 +837,8 @@ def build_agent():
     def router(state: AgentState) -> Literal["tools","end"]:
         last = state["messages"][-1]
         if state.get("iteration",0) >= 8: return "end"
-        return "tools" if hasattr(last,"tool_calls") and last.tool_calls else "end"
+        tcs = getattr(last, "tool_calls", None)
+        return "tools" if tcs else "end"
 
     g = StateGraph(AgentState)
     g.add_node("llm",   llm_node)

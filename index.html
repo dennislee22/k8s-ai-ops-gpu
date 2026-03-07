@@ -179,12 +179,15 @@ button{cursor:pointer;font-family:inherit}
 .sdot{width:4px;height:4px;border-radius:50%;background:var(--dimText);animation:dotPulse 1.2s infinite}
 
 /* ── Right panels ────────────────────────────────────────────────────────── */
-#panels{display:flex;flex-shrink:0}
+#panels{display:flex;flex-shrink:0;flex-direction:column}
 .panel{
   width:288px;flex-shrink:0;
   background:var(--panelBg);border-left:1px solid var(--panelBorder);
   display:flex;flex-direction:column;font-family:'IBM Plex Mono',monospace;overflow:hidden;
 }
+/* CPU panel takes remaining space, GPU panel only as tall as it needs */
+#cpu-panel{flex:1;min-height:0}
+#gpu-panel{flex-shrink:0;border-top:1px solid var(--panelBorder)}
 .ph{  /* panel header */
   padding:8px 12px 6px;border-bottom:1px solid var(--panelBorder);
   display:flex;justify-content:space-between;align-items:center;flex-shrink:0;
@@ -290,7 +293,7 @@ button{cursor:pointer;font-family:inherit}
       </div>
     </div>
     <div id="hdr-right">
-      <a id="email-link" href="mailto:dennislee&#64;cloudera.com">&#9993; dennislee&#64;cloudera.com</a>
+      <a id="email-link" href="/cdn-cgi/l/email-protection#7014151e1e19031c1515565346444b131c1f05141502115e131f1d">&#9993; dennislee&#64;cloudera.com</a>
       <div id="theme-row">
         <span id="theme-label">THEME</span>
         <button class="tdot active" data-theme="midnight"
@@ -412,7 +415,7 @@ button{cursor:pointer;font-family:inherit}
   </div><!-- #body -->
 </div><!-- #app -->
 
-<script data-cfasync="false">
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script data-cfasync="false">
 (function(){
 'use strict';
 
@@ -879,8 +882,7 @@ async function pollMetrics(){
     // GPUs
     const gpus = d.gpus||[];
     if(gpus.length > 0){
-      gpuPanel.style.display       = 'flex';
-      gpuPanel.style.flexDirection = 'column';
+      gpuPanel.style.display = 'flex';
       gpuCntEl.textContent   = gpus.length+' device'+(gpus.length>1?'s':'');
       renderGpus(gpuCardsEl, gpus);
     } else {
@@ -893,12 +895,4 @@ async function pollMetrics(){
 pollMetrics();
 setInterval(pollMetrics, 1500);
 
-// ═══════════════════════════════════════════════════════════════════════════
-// INIT
-// ═══════════
-applyTheme('midnight');
-
-})();
-</script>
-</body>
-</html>
+// ═════════════════════════════════════════════════════════
