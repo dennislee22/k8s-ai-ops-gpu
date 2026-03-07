@@ -62,7 +62,7 @@ button{cursor:pointer;font-family:inherit}
 #logos{display:flex;align-items:center;gap:8px;flex-shrink:0}
 #logos img{object-fit:contain;display:block}
 #title-block{display:flex;flex-direction:column;gap:2px}
-#ttl{font-size:19px;font-weight:700;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em;line-height:1}
+#ttl{font-size:19px;font-weight:700;font-family:'IBM Plex Sans',sans-serif;letter-spacing:-.02em;line-height:1}
 #subtitle{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;display:flex;align-items:center;gap:5px}
 #hdr-right{margin-left:auto;display:flex;align-items:center;gap:14px}
 #email-link{font-size:11px;color:var(--dimText);font-family:'IBM Plex Mono',monospace;text-decoration:none;transition:color .2s}
@@ -356,7 +356,7 @@ button{cursor:pointer;font-family:inherit}
           </div>
           <!-- CPU utilisation row with dotbar -->
           <div class="util-row" style="margin-bottom:8px">
-            <span class="util-lbl">CPU</span>
+            <span class="util-lbl">Utilisation</span>
             <div id="cpu-dotbar"></div>
             <span id="cpu-total-pct" class="util-pct">&mdash;</span>
           </div>
@@ -367,9 +367,9 @@ button{cursor:pointer;font-family:inherit}
 
         <!-- Memory utilisation -->
         <div class="psec" style="border-top:1px solid var(--panelBorder);padding-top:8px">
-          <div style="color:var(--panelLabel);font-weight:700;font-size:11px;letter-spacing:.04em;margin-bottom:6px">MEMORY UTILISATION</div>
+          <div style="color:var(--panelLabel);font-weight:700;font-size:11px;letter-spacing:.04em;margin-bottom:6px">RAM MONITOR</div>
           <div class="util-row">
-            <span class="util-lbl">MEM</span>
+            <span class="util-lbl">Utilisation</span>
             <div class="ubar-wrap" id="mem-bar-wrap">
               <div id="mem-fill" class="ubar-fill"></div>
               <div class="ubar-dots"></div>
@@ -651,18 +651,45 @@ function showThinking(updates){
 }
 function removeThinking(){ if(thinkEl){thinkEl.remove();thinkEl=null;} }
 
-// Format AI response — strip raw system-prompt leakage, render markdown-lite
+// Format AI response — strip ALL chat-template token leakage
 function formatResponse(raw){
-  // Strip any leaked system prompt markers
-  let text = raw.replace(/<\|im_start\|>[\s\S]*?<\|im_end\|>/g, '').trim();
-  // Also strip if it starts with <|im_start|> and we can't find end
-  if(text.startsWith('<|im_start|>')){
-    const idx = text.lastIndexOf('<|im_start|>user');
-    if(idx !== -1) text = text.slice(idx).replace('<|im_start|>user','').replace('<|im_end|>','').trim();
-    else text = text.replace(/<\|im_start\|>\w+/g,'').replace(/<\|im_end\|>/g,'').trim();
-  }
-  // Trim any leading/trailing assistant marker
-  text = text.replace(/^<\|im_start\|>assistant\s*/,'').replace(/<\|im_end\|>\s*$/,'').trim();
+  let text = raw || '';
+
+  // ── 1. Strip complete <|im_start|>role....<|im_end|> blocks (greedy variant) ──
+  text = text.replace(/<\|im_start\|>[\s\S]*?<\|im_end\|>\n?/g, '');
+
+  // ── 2. Strip any remaining bare tokens (start / end / role names) ─────────
+  //    Covers both the pipe-form and any encoding corruption where
+  //    <|im_end|> bleeds through as the trailing 'óst', 'ouser', etc.
+  //    Pattern: optional whitespace, known role word, optional whitespace
+  const ROLE_RE = /\b(system|user|assistant|human|model|im_start|im_end)\b/gi;
+
+  // Strip angle-bracket forms first
+  text = text.replace(/<\|im_start\|>/g, '')
+             .replace(/<\|im_end\|>/g, '')
+             .replace(/<\|[^|]*\|>/g, '');   // any other <|token|> form
+
+  // ── 3. Strip trailing artifact patterns that appear after a sentence end ──
+  //    e.g. "...is needed.óst\nouser\nAre there any..." or "...needed.óst\nassistant"
+  //    These come from the model echoing back earlier turns with corrupted delimiters.
+  //    Strategy: find the last clean sentence-ending period or bullet and truncate there.
+  //
+  //    More targeted: strip lines that are ONLY a role word (possibly with punct)
+  text = text.split('\n')
+    .filter(line => {
+      const stripped = line.trim().replace(/[.?!,;:\u00f3]/g, ''); // ó = 0xf3
+      return !ROLE_RE.test(stripped) || stripped.length > 20;
+    })
+    .join('\n');
+
+  // ── 4. Strip inline role-word suffixes attached to sentence endings ────────
+  //    e.g. "assistance is needed.óst" → "assistance is needed."
+  text = text.replace(/([.!?])\u00f3?st\b/gi, '$1')   // .óst or .st
+             .replace(/([.!?])\s*ouser\b/gi, '$1')    // .ouser
+             .replace(/([.!?])\s*assistant\b/gi, '$1'); // .assistant
+
+  // ── 5. Final cleanup ───────────────────────────────────────────────────────
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
   return text;
 }
 
