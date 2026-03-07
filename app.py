@@ -568,15 +568,25 @@ def _build_llm():
             from langchain_huggingface import HuggingFacePipeline, ChatHuggingFace
             import transformers, torch
             _log_ag.info("[LLM] Loading HuggingFacePipeline from local dir…")
+
+            # Keep generation params out of pipeline() to avoid the
+            # "Passing generation_config together with generation-related
+            #  arguments is deprecated" warning. Set them on the pipeline
+            # object after construction instead.
             pipe = transformers.pipeline(
                 "text-generation",
                 model=model_dir,
                 tokenizer=model_dir,
+                device_map="auto" if NUM_GPU > 0 else "cpu",
+                dtype=torch.float16 if NUM_GPU > 0 else torch.float32,
+            )
+            # Override generation defaults cleanly via GenerationConfig
+            from transformers import GenerationConfig
+            pipe.model.generation_config = GenerationConfig(
                 max_new_tokens=1024,
                 temperature=0.1,
                 repetition_penalty=1.1,
-                device_map="auto" if NUM_GPU > 0 else "cpu",
-                torch_dtype=torch.float16 if NUM_GPU > 0 else torch.float32,
+                do_sample=True,
             )
             llm = ChatHuggingFace(llm=HuggingFacePipeline(pipeline=pipe))
             _log_ag.info("[LLM] ChatHuggingFace ready (supports tool calling)")
@@ -711,12 +721,54 @@ def build_agent():
                 return calls
         return [("get_node_health", {}), ("get_pod_status", {"namespace": "all"})]
 
+    # Detect whether the underlying LLM is ChatHuggingFace, which requires
+    # the last message to always be a HumanMessage.  Ollama handles
+    # ToolMessages natively; ChatHuggingFace does not.
+    _is_hf = False
+    try:
+        from langchain_huggingface import ChatHuggingFace as _CHF
+        _raw = llm
+        while hasattr(_raw, "bound"):   # unwrap bind_tools() layers
+            _raw = _raw.bound
+        _is_hf = isinstance(_raw, _CHF)
+    except ImportError:
+        pass
+    _log_ag.info(f"[LLM] ChatHuggingFace mode: {_is_hf}")
+
+    def _prepare_messages_for_hf(msgs: list) -> list:
+        """
+        ChatHuggingFace requires: last message == HumanMessage.
+        After tool calls the graph state ends with ToolMessage(s).
+        Collapse all trailing tool results into one HumanMessage so the
+        model can see the results and produce a final answer.
+        """
+        if not msgs:
+            return msgs
+        # Partition: everything up to and including the AIMessage that
+        # triggered tools, then all the ToolMessages that follow.
+        tool_results = []
+        head = list(msgs)
+        while head and isinstance(head[-1], ToolMessage):
+            tool_results.insert(0, head.pop())
+        if not tool_results:
+            return msgs   # nothing to rewrite
+
+        # Serialise tool results as readable text
+        parts = ["Here are the tool results:\n"]
+        for tr in tool_results:
+            parts.append(f"[{tr.tool_call_id}]\n{tr.content}\n")
+        parts.append("\nBased on the above results, answer the user question.")
+        return head + [HumanMessage(content="\n".join(parts))]
+
     def llm_node(state: AgentState):
         itr      = state.get("iteration", 0) + 1
         msgs     = state["messages"]
         updates  = list(state.get("status_updates", []))
         sys_msg  = SystemMessage(content=prompt)
-        response = llm.invoke([sys_msg] + msgs)
+
+        # For ChatHuggingFace: rewrite trailing ToolMessages → HumanMessage
+        invoke_msgs = _prepare_messages_for_hf(msgs) if _is_hf else msgs
+        response = llm.invoke([sys_msg] + invoke_msgs)
         tcs      = getattr(response, "tool_calls", None) or []
 
         if not tcs and itr == 1:
