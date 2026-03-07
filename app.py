@@ -339,7 +339,7 @@ SYSTEM_PROMPT = """You are an expert Kubernetes operations assistant running in 
 CRITICAL RULES:
 1. ALWAYS call tools first — never answer from memory alone.
 2. NEVER fabricate data — only report what tools actually returned.
-3. NEVER output raw bash commands, kubectl pipes (e.g., `| jq`), or mock terminal output. 
+3. NEVER output raw bash commands, kubectl pipes (e.g., `| jq`), or mock terminal output.
 4. Be specific — name the exact pod, node, or deployment with the issue.
 5. NEVER suggest write operations (restart, delete, scale) — diagnose only.
 6. When you have tool results, answer IMMEDIATELY and CONCISELY. One answer only.
@@ -347,12 +347,15 @@ CRITICAL RULES:
 SITE-SPECIFIC RULES:
 {custom_rules}
 
-RESPONSE FORMAT:
-- Format your response as a direct, factual summary. 
-- NO conversational filler (e.g., do NOT say "Here is the status...", "Based on the results...").
-- Provide ONLY the direct answer, facts, or raw data summaries.
-- DO NOT add a "Next Steps", "Investigation Steps", "Summary", or "Conclusion" section.
+RESPONSE FORMAT — STRICT:
+- Answer in plain, direct sentences. No preamble.
+- DO NOT open with: "Here is", "Based on", "According to", "I can see", "The results show", "Sure!", "Certainly!", or any greeting/acknowledgement.
+- DO NOT close with: "Let me know if you need more", "I hope this helps", "Feel free to ask", or any follow-up offer.
+- DO NOT add sections titled "Next Steps", "Investigation Steps", "Summary", "Conclusion", or "Recommendation".
 - DO NOT repeat or restate the user's question.
+- DO NOT narrate your actions (e.g., do NOT say "I will now check the pods...").
+- State facts only. If a tool returned data, report it. If nothing is wrong, say so in one sentence.
+- If multiple issues exist, list them as short bullet points — no elaboration beyond the raw facts.
 """
 
 RAG_INSTRUCTION = "\n7. ALWAYS search documentation before finalising a diagnosis."
@@ -468,7 +471,9 @@ def build_agent():
         synthesis_prompt = (
             f"Question: {original_question}\n\n"
             f"Tool Results:\n{''.join(parts)}\n"
-            "Based STRICTLY on the tool results above, summarize the data directly and concisely."
+            "Answer the question using ONLY the tool results above.\n"
+            "Rules: No preamble. No 'Based on...'. No 'Here is...'. No closing offer. "
+            "No next-steps section. State facts only. One concise answer."
         )
         return [HumanMessage(content=synthesis_prompt)]
 
@@ -544,17 +549,53 @@ def get_agent():
     return _agent
 
 def _clean_response(text: str, user_question: str = "") -> str:
+    # ── Strip model special tokens ────────────────────────────────────────────
     text = re.sub(r'<\|im_start\|>\w+\s*\n?[\s\S]*?<\|im_end\|>\n?', '', text)
     if '<|im_start|>' in text: text = re.sub(r'^\w+\s*\n', '', text.split('<|im_start|>')[-1], count=1)
     for tok in ['<|im_end|>', '<s>', '</s>', '[INST]', '[/INST]', '<<SYS>>', '<</SYS>>']: text = text.replace(tok, '')
-    
+
+    # ── Strip repeated user question ─────────────────────────────────────────
     if user_question:
         q_stripped = user_question.strip()
         escaped    = re.escape(q_stripped)
         text = re.sub(r'(?i)(\s*' + escaped + r'[?!.]?\s*){2,}', ' ', text)
         text = re.sub(r'(?i)^\s*' + escaped + r'[?!.]?\s*\n', '', text)
-    
+
+    # ── Strip model artefacts ─────────────────────────────────────────────────
     text = re.sub(r'Summarise the above tool results.*', '', text, flags=re.IGNORECASE)
+
+    # ── Strip conversational filler openers ───────────────────────────────────
+    # These patterns mirror kubectl-ai's "no conversational padding" principle:
+    # the agent should start with the fact, not with narration about the fact.
+    _OPENER_PATTERNS = [
+        r'^(sure[,!]?\s*)',
+        r'^(certainly[,!]?\s*)',
+        r'^(of course[,!]?\s*)',
+        r'^(great[,!]?\s*)',
+        r'^(absolutely[,!]?\s*)',
+        r'^(here\s+is\s+(a\s+)?(the\s+)?[^.]{0,60}[:.]\s*)',
+        r'^(here\s+are\s+(the\s+)?[^.]{0,60}[:.]\s*)',
+        r'^(based\s+on\s+(the\s+)?(tool\s+)?(results?|data|output)[^.]{0,80}[:.]\s*)',
+        r'^(according\s+to\s+(the\s+)?(tool\s+)?(results?|data|output)[^.]{0,80}[:.]\s*)',
+        r'^(the\s+(tool\s+)?(results?|data|output)\s+(show|indicate|reveal)[^.]{0,80}[:.]\s*)',
+        r'^(i\s+(can\s+see|found|have\s+checked|checked|will\s+now|am\s+now)[^.]{0,80}[.!]\s*)',
+        r'^(let\s+me\s+[^.]{0,60}[.!]\s*)',
+    ]
+    for pat in _OPENER_PATTERNS:
+        text = re.sub(pat, '', text, flags=re.IGNORECASE)
+
+    # ── Strip conversational filler closers ───────────────────────────────────
+    _CLOSER_PATTERNS = [
+        r'(\s*let\s+me\s+know\s+if\s+you\s+(need|want|have)[^.]*\.\s*)$',
+        r'(\s*feel\s+free\s+to\s+ask[^.]*\.\s*)$',
+        r'(\s*i\s+hope\s+this\s+helps?[^.]*\.\s*)$',
+        r'(\s*if\s+you\s+(need|want|have)\s+(any\s+)?(more|further|additional)[^.]*\.\s*)$',
+        r'(\s*please\s+(let\s+me\s+know|don\'t\s+hesitate)[^.]*\.\s*)$',
+        r'(\n\s*#+\s*(Next Steps|Summary|Conclusion|Recommendations?)[^\n]*(\n[^\n]+)*)',
+    ]
+    for pat in _CLOSER_PATTERNS:
+        text = re.sub(pat, '', text, flags=re.IGNORECASE)
+
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
