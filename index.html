@@ -164,6 +164,12 @@ button{cursor:pointer;font-family:inherit}
   font-family:'IBM Plex Mono',monospace;font-weight:700;
 }
 .tmeta{font-size:10px;color:var(--dimText);font-family:'IBM Plex Mono',monospace}
+.kubectl-log{
+  margin-top:6px;font-family:'IBM Plex Mono',monospace;font-size:10px;
+  color:var(--dimText);background:var(--panelBg);border:1px solid var(--border);
+  border-radius:6px;padding:6px 10px;display:flex;flex-direction:column;gap:2px;
+}
+.kubectl-cmd{color:#7dd3fc;white-space:pre-wrap;word-break:break-all}
 
 /* Thinking status */
 .status-box{
@@ -693,7 +699,7 @@ function formatResponse(raw){
   return text;
 }
 
-function appendAi(text, tools, iters, elapsed){
+function appendAi(text, tools, iters, elapsed, statusUpdates){
   const clean   = formatResponse(text);
   const unique  = [...new Set(tools||[])];
   const badges  = unique.map(t=>
@@ -702,6 +708,13 @@ function appendAi(text, tools, iters, elapsed){
   const toolRow = unique.length
     ? '<div class="ai-tools"><span class="tmeta">called:</span>'+badges
       +'<span class="tmeta">&middot; '+iters+' iter'+(iters!==1?'s':'')+'</span></div>'
+    : '';
+  // Extract $ kubectl ... lines from status_updates and render as command log
+  const cmds = (statusUpdates||[]).filter(s=>s.startsWith('$ '));
+  const cmdLog = cmds.length
+    ? '<div class="kubectl-log">'
+      + cmds.map(c=>'<span class="kubectl-cmd">'+esc(c)+'</span>').join('')
+      +'</div>'
     : '';
   const d = document.createElement('div');
   d.className = 'msg-ai fade-up';
@@ -715,6 +728,7 @@ function appendAi(text, tools, iters, elapsed){
     +'<div class="ai-bubble">'+esc(clean)+'</div>'
     +(elapsed!=null?'<div class="ai-elapsed">&#8987; '+elapsed+'s</div>':'')
     +toolRow
+    +cmdLog
     +'</div>';
   msgsEl.appendChild(d);
   scrollBot();
@@ -743,7 +757,7 @@ async function sendMessage(override){
     if(!res.ok){ const e=await res.json(); throw new Error(e.detail||'HTTP '+res.status); }
     const data = await res.json();
     removeThinking();
-    appendAi(data.response, data.tools_used, data.iterations, data.elapsed_seconds);
+    appendAi(data.response, data.tools_used, data.iterations, data.elapsed_seconds, data.status_updates);
   } catch(err){
     removeThinking();
     appendAi('\u26A0 Error: '+err.message+'\n\nMake sure the backend is running:\n  python3 app.py', [], 0, null);

@@ -810,72 +810,55 @@ def build_agent():
                 return calls
         return [("get_node_health", {}), ("get_pod_status", {"namespace": "all"})]
 
-    # Detect whether the underlying LLM is ChatHuggingFace, which requires
-    # the last message to always be a HumanMessage.  Ollama handles
-    # ToolMessages natively; ChatHuggingFace does not.
-    _is_hf = False
-    try:
-        from langchain_huggingface import ChatHuggingFace as _CHF
-        _raw = llm
-        while hasattr(_raw, "bound"):   # unwrap bind_tools() layers
-            _raw = _raw.bound
-        _is_hf = isinstance(_raw, _CHF)
-    except ImportError:
-        pass
-    _log_ag.info(f"[LLM] ChatHuggingFace mode: {_is_hf}")
-
     def _prepare_messages_for_hf(msgs: list) -> list:
         """
-        ChatHuggingFace / apply_chat_template requires:
-          (a) last message == HumanMessage
-          (b) NO AIMessage with tool_calls mid-history — it causes the model
-              to echo the entire conversation instead of answering.
+        Rewrite trailing ToolMessages into a clean HumanMessage so that
+        apply_chat_template gets a valid human/assistant sequence.
 
-        Strategy: reconstruct a MINIMAL 2-message context:
-          1. The original HumanMessage (user question)
-          2. A new HumanMessage containing all tool results + answer instruction
+        Applied for ALL model types: Ollama Qwen also echoes the instruction
+        string when it appears inside a HumanMessage, causing the visible
+        "Using only the tool results above..." loop in responses.
 
-        This avoids passing any AIMessage/ToolMessage to apply_chat_template.
+        Strategy:
+          - HumanMessage 1: original user question (unchanged)
+          - HumanMessage 2: tool results ONLY — no inline instructions
+            (the SystemMessage already contains all formatting rules)
         """
         if not msgs:
             return msgs
 
-        # Collect all ToolMessages (trailing)
+        # Collect trailing ToolMessages
         tool_results = []
         head = list(msgs)
         while head and isinstance(head[-1], ToolMessage):
             tool_results.insert(0, head.pop())
 
         if not tool_results:
-            # No tool results yet — just ensure last msg is HumanMessage
-            # Strip any AIMessages to avoid template echo
+            # No tool results yet — strip AIMessages to avoid template echo
             human_only = [m for m in msgs if isinstance(m, HumanMessage)]
             return human_only if human_only else msgs
 
-        # Extract the original user question (first HumanMessage in history)
+        # Original user question
         original_question = next(
             (m.content for m in msgs if isinstance(m, HumanMessage)
              and isinstance(m.content, str)), "")
 
-        # Build clean tool-results summary
+        # Tool results ONLY — no instruction text (SystemMessage handles that)
         parts = []
         for tr in tool_results:
-            # Truncate very long tool outputs to avoid context overflow
-            body = tr.content if len(tr.content) <= 3000 else tr.content[:3000] + "\n...[truncated]"
+            body = (tr.content if len(tr.content) <= 3000
+                    else tr.content[:3000] + "\n...[truncated]")
             parts.append(f"Tool result:\n{body}")
-        parts.append(
-            "\nUsing only the tool results above, provide a concise diagnosis "
-            "for the question: " + repr(original_question) + ". "
-            "Start directly with findings. "
-            "Do NOT repeat the question. "
-            "Do NOT begin with \'Based on the tool results\'. "
-            "Do NOT add a Next Steps section."
-        )
+
         tool_summary = HumanMessage(content="\n\n".join(parts))
 
-        # Return ONLY: original question + tool summary (2 messages)
-        # Omit ALL AIMessages and prior ToolMessages — they cause echo loops.
+        # Return: [original question] + [tool results]
+        # The SystemMessage prepended by llm_node carries all formatting rules.
         return [HumanMessage(content=original_question), tool_summary]
+
+    # Apply _prepare_messages_for_hf for ALL model types — Ollama Qwen echoes
+    # instruction strings in HumanMessages the same way ChatHuggingFace does.
+    _log_ag.info("[LLM] Message rewriting: always ON (prevents Qwen echo loops)")
 
     def llm_node(state: AgentState):
         itr      = state.get("iteration", 0) + 1
@@ -883,8 +866,9 @@ def build_agent():
         updates  = list(state.get("status_updates", []))
         sys_msg  = SystemMessage(content=prompt)
 
-        # For ChatHuggingFace: rewrite trailing ToolMessages → HumanMessage
-        invoke_msgs = _prepare_messages_for_hf(msgs) if _is_hf else msgs
+        # Always rewrite ToolMessages into clean HumanMessage pairs.
+        # Prevents Ollama Qwen from echoing instruction strings back.
+        invoke_msgs = _prepare_messages_for_hf(msgs)
         response = llm.invoke([sys_msg] + invoke_msgs)
         tcs      = getattr(response, "tool_calls", None) or []
 
@@ -928,7 +912,11 @@ def build_agent():
             ns    = args.get("namespace", "")
             if ns and ns not in ("default", "all"):
                 label += f" ({ns})"
-            updates.append(label)
+            # For kubectl_exec: surface the actual command in the status log
+            if name == "kubectl_exec" and "command" in args:
+                updates.append(f"$ {args['command']}")
+            else:
+                updates.append(label)
             try:
                 fn  = tool_map.get(name)
                 out = fn.invoke(json.dumps(args) if args else "{}") if fn \
