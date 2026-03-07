@@ -99,8 +99,11 @@ def get_pod_status(namespace: str = "all", show_all: bool = False) -> str:
                 f"| Ready {ready}/{total} | Restarts:{restarts}"
                 + (f" [{', '.join(bad)}]" if bad else "")
             )
+            # Healthy = running/ready with ≤5 lifetime restarts.
+            # Low restart counts from rolling upgrades are normal in production
+            # clusters (e.g. Longhorn). Threshold of 0 creates too much noise.
             is_ok = (phase in ("Running", "Succeeded", "Completed")
-                     and ready == total and restarts == 0)
+                     and ready == total and restarts <= 5)
             if is_ok:
                 healthy.append(row)
             else:
@@ -368,30 +371,53 @@ def get_hpa_status(namespace: str = "all") -> str:
 # ── Storage ───────────────────────────────────────────────────────────────────
 
 def get_pvc_status(namespace: str = "all") -> str:
-    """Check PersistentVolumeClaims — highlights Pending or Lost claims."""
+    """Check PersistentVolumeClaims.
+
+    For a specific namespace: ALL PVCs are listed (Bound and non-Bound) so the
+    LLM can accurately answer "what PVCs does <workload> have?" questions.
+    For namespace="all": Bound PVCs are summarised as a count to reduce noise;
+    only Pending/Lost/Unknown PVCs are shown in detail.
+    """
     try:
         pvcs = (_core.list_persistent_volume_claim_for_all_namespaces()
                 if namespace == "all"
                 else _core.list_namespaced_persistent_volume_claim(
                     namespace=namespace))
         if not pvcs.items:
-            return f"No PVCs in '{namespace}'."
-        lines = [f"PVCs in '{namespace}':"]
-        skipped = 0
+            return f"No PVCs found in namespace '{namespace}'."
+
+        # Specific namespace: always show every PVC so the LLM sees them all
+        if namespace != "all":
+            lines = [f"PVCs in '{namespace}' ({len(pvcs.items)} total):"]
+            for pvc in pvcs.items:
+                phase = pvc.status.phase or "Unknown"
+                sc    = pvc.spec.storage_class_name or "default"
+                cap   = (pvc.status.capacity or {}).get("storage", "?")
+                vol   = pvc.spec.volume_name or "<unbound>"
+                flag  = "" if phase == "Bound" else " ⚠"
+                lines.append(
+                    f"  {pvc.metadata.name}: {phase}{flag} | "
+                    f"capacity:{cap} | class:{sc} | volume:{vol}")
+            return "\n".join(lines)
+
+        # All namespaces: detail only non-Bound, summarise Bound
+        lines = ["PVCs across all namespaces:"]
+        bound = 0
         for pvc in pvcs.items:
             phase = pvc.status.phase or "Unknown"
             if phase == "Bound":
-                skipped += 1; continue
+                bound += 1
+                continue
             sc  = pvc.spec.storage_class_name or "default"
             cap = (pvc.status.capacity or {}).get("storage", "?")
             lines.append(
                 f"  {pvc.metadata.namespace}/{pvc.metadata.name}: "
-                f"{phase} | class:{sc} capacity:{cap}")
-        if skipped:
-            lines.append(f"  ({skipped} Bound PVCs omitted)")
-        return "\n".join(lines) if len(lines) > 1 else f"All PVCs Bound in '{namespace}'."
+                f"{phase} ⚠ | class:{sc} capacity:{cap}")
+        if bound:
+            lines.append(f"  ({bound} Bound PVCs healthy — omitted for brevity)")
+        return "\n".join(lines) if len(lines) > 1 else f"All {bound} PVCs are Bound (healthy) across all namespaces."
     except ApiException as e:
-        return f"K8s API error: {e.reason}"
+        return f"K8s API error (PVC listing): {e.reason}"
 
 
 def get_persistent_volumes() -> str:
@@ -608,6 +634,26 @@ def get_namespace_status() -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _KUBECTL_MAX_OUT  = int(os.getenv("KUBECTL_MAX_CHARS", "8000"))
+
+
+def _safe_reason(e) -> str:
+    """
+    Return a clean, single-line error string from an ApiException.
+
+    ApiException.reason is usually a short string like "Internal Server Error".
+    str(e) / e.body can contain multi-line JSON blobs that the LLM echoes back
+    verbatim, producing garbled output. We always use e.reason (or a fallback)
+    and never expose e.body to the LLM.
+    """
+    try:
+        reason = getattr(e, "reason", None) or ""
+        status = getattr(e, "status", 0)
+        if reason:
+            return f"HTTP {status} {reason}"
+        # Last resort: first 80 chars of str(e) with newlines stripped
+        return str(e).replace("\n", " ")[:80]
+    except Exception:
+        return "Unknown API error"
 _ALLOW_WRITES     = os.getenv("KUBECTL_ALLOW_WRITES", "false").lower() in ("1", "true", "yes")
 
 _KUBECTL_READ_VERBS  = {
@@ -1169,7 +1215,7 @@ def _handle_get(p: dict) -> str:
         return _obj_to_table(items, kind)
 
     except ApiException as e:
-        return f"[ERROR] API error getting {resource}: {e.reason} (status {e.status})"
+        return f"[ERROR] API error getting {resource}: {_safe_reason(e)}"
 
 
 def _handle_describe(p: dict) -> str:

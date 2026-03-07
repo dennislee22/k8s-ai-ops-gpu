@@ -467,7 +467,7 @@ NAMESPACE DISCOVERY RULE (critical):
 - For Vault: ALWAYS use "kubectl get pods -n vault-system" first.
   NEVER use "kubectl get pods -A | grep -i vault" — this matches unrelated pods
   such as backup jobs and CronJobs whose names contain 'vault'.
-  If vault-system has no pods, use get_pod_status with namespace='all' and show_all=True, then filter by namespace in the response.
+  If vault-system has no pods, use get_pod_status(namespace='all', show_all=True) and filter by namespace.
 - Apply the same principle to any workload: query its specific namespace directly.
 
 POD LISTING RULE:
@@ -730,7 +730,8 @@ def build_agent():
         # Use get_pod_status with show_all=True — kubectl_exec does NOT support
         # shell operators (||, awk, 2>/dev/null) since it uses the Python K8s
         # API client directly, not a real shell. Shell-pipe commands silently
-        # fail and the LLM receives empty/error output, causing hallucinations.
+        # fail and the LLM receives empty/error output.
+        # get_pvc_status with specific namespace now shows ALL PVCs (incl. Bound).
         (["vault", "hashicorp", "unseal", "secret engine"],
          [("get_pod_status", {"namespace": "vault-system", "show_all": True}),
           ("get_pvc_status",  {"namespace": "vault-system"}),
@@ -1041,6 +1042,15 @@ def _clean_response(text: str, user_question: str = "") -> str:
                 break
 
     # ── 6. Collapse excessive blank lines ────────────────────────────────────
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
+    # ── 7. Strip raw API error blobs that LLMs sometimes echo back ───────────
+    # These come from ApiException bodies leaking into tool output and then
+    # being repeated verbatim by the model instead of summarised.
+    # Patterns: {"message": "..."} blobs and standalone "HttpStatus NNN" lines.
+    text = re.sub(r'\{\s*"message"\s*:\s*"[^"]*"\s*\}', '', text)
+    text = re.sub(r'HttpStatus\s*\d+', '', text)
+    # Clean up any leftover blank lines from the above removals
     text = re.sub(r'\n{3,}', '\n\n', text)
 
     return text.strip()
