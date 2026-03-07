@@ -17,10 +17,15 @@ kubernetes>=29.0
 # ── Vector DB: ChromaDB (embedded, no external server needed) ─────────────────
 chromadb>=0.5
 
-# ── Embeddings: sentence-transformers (supports local dir via --embed-dir) ────
+# ── Embeddings: sentence-transformers (supports local dir + GPU via --embed-dir)
 sentence-transformers>=3.0
 
-# ── Document parsing (Phase 2 RAG) ───────────────────────────────────────────
+# ── GPU support for embedding model (sentence-transformers uses torch) ─────────
+# Installs CPU-only torch by default. For NVIDIA GPU replace with:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.0
+
+# ── Document parsing (Phase 2 RAG) ────────────────────────────────────────────
 pypdf>=4.0
 markdown-it-py>=3.0
 
@@ -31,8 +36,8 @@ httpx>=0.27
 # ── Config ────────────────────────────────────────────────────────────────────
 python-dotenv>=1.0
 
-# ── OPTIONAL: GPU monitoring ──────────────────────────────────────────────────
-# pip install nvidia-ml-py
+# ── GPU monitoring (NVIDIA only) ──────────────────────────────────────────────
+nvidia-ml-py>=12.0
 
 # ── OPTIONAL: Load LLM from local directory without Ollama (--model-dir) ──────
-# pip install -U langchain-huggingface transformers torch accelerate
+# pip install -U langchain-huggingface transformers accelerate
