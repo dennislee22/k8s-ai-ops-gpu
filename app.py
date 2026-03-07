@@ -768,34 +768,56 @@ def build_agent():
 
     def _prepare_messages_for_hf(msgs: list) -> list:
         """
-        ChatHuggingFace requires: last message == HumanMessage.
-        After tool calls the graph state ends with ToolMessage(s).
-        Collapse all trailing tool results into one HumanMessage so the
-        model can see the results and produce a final answer.
+        ChatHuggingFace / apply_chat_template requires:
+          (a) last message == HumanMessage
+          (b) NO AIMessage with tool_calls mid-history — it causes the model
+              to echo the entire conversation instead of answering.
+
+        Strategy: reconstruct a MINIMAL 2-message context:
+          1. The original HumanMessage (user question)
+          2. A new HumanMessage containing all tool results + answer instruction
+
+        This avoids passing any AIMessage/ToolMessage to apply_chat_template.
         """
         if not msgs:
             return msgs
-        # Partition: everything up to and including the AIMessage that
-        # triggered tools, then all the ToolMessages that follow.
+
+        # Collect all ToolMessages (trailing)
         tool_results = []
         head = list(msgs)
         while head and isinstance(head[-1], ToolMessage):
             tool_results.insert(0, head.pop())
-        if not tool_results:
-            return msgs   # nothing to rewrite
 
-        # Serialise tool results — use clean section headers, no IDs or preamble
-        # The instruction wording here directly shapes how the model opens its reply.
+        if not tool_results:
+            # No tool results yet — just ensure last msg is HumanMessage
+            # Strip any AIMessages to avoid template echo
+            human_only = [m for m in msgs if isinstance(m, HumanMessage)]
+            return human_only if human_only else msgs
+
+        # Extract the original user question (first HumanMessage in history)
+        original_question = next(
+            (m.content for m in msgs if isinstance(m, HumanMessage)
+             and isinstance(m.content, str)), "")
+
+        # Build clean tool-results summary
         parts = []
         for tr in tool_results:
-            parts.append(f"Tool result:\n{tr.content}")
+            # Truncate very long tool outputs to avoid context overflow
+            body = tr.content if len(tr.content) <= 3000 else tr.content[:3000] + "\n...[truncated]"
+            parts.append(f"Tool result:\n{body}")
         parts.append(
-            "\nUsing only the tool results above, provide a concise diagnosis. "
+            "\nUsing only the tool results above, provide a concise diagnosis "
+            "for the question: " + repr(original_question) + ". "
             "Start directly with findings. "
-            "Do NOT begin with 'Based on the tool results'. "
+            "Do NOT repeat the question. "
+            "Do NOT begin with \'Based on the tool results\'. "
             "Do NOT add a Next Steps section."
         )
-        return head + [HumanMessage(content="\n\n".join(parts))]
+        tool_summary = HumanMessage(content="\n\n".join(parts))
+
+        # Return ONLY: original question + tool summary (2 messages)
+        # Omit ALL AIMessages and prior ToolMessages — they cause echo loops.
+        return [HumanMessage(content=original_question), tool_summary]
 
     def llm_node(state: AgentState):
         itr      = state.get("iteration", 0) + 1
@@ -886,8 +908,18 @@ def get_agent():
     return _agent
 
 
-def _clean_response(text: str) -> str:
-    """Strip chat-template tokens that some models (e.g. Qwen2.5) leak into output."""
+def _clean_response(text: str, user_question: str = "") -> str:
+    """
+    Strip chat-template tokens and conversation-echo artifacts.
+
+    ChatHuggingFace sometimes echoes prior turns or repeats the user question
+    multiple times before settling on an answer.  This function:
+      1. Strips all <|im_start|>...<|im_end|> blocks
+      2. Strips bare template tokens
+      3. Detects and removes repeated-question echo loops
+      4. Keeps only the final (real) assistant answer
+    """
+    # ── 1. Strip complete im_start/im_end blocks ──────────────────────────────
     text = re.sub(r'<\|im_start\|>\w+\s*\n?[\s\S]*?<\|im_end\|>\n?', '', text)
     if '<|im_start|>' in text:
         last = text.split('<|im_start|>')[-1]
@@ -896,6 +928,40 @@ def _clean_response(text: str) -> str:
     for tok in ['<|im_end|>', '<s>', '</s>', '[INST]', '[/INST]',
                 '<<SYS>>', '<</SYS>>']:
         text = text.replace(tok, '')
+
+    # ── 2. Strip conversation-echo: repeated user question lines ─────────────
+    # Pattern: the model echoes "Are there any X?\nAre there any X?\n..." 10x
+    if user_question:
+        q_stripped = user_question.strip()
+        # Remove all occurrences of the question (exact or with trailing punct)
+        escaped = re.escape(q_stripped)
+        text = re.sub(r'(?i)(\s*' + escaped + r'[?!.]?\s*){{2,}}', '', text)
+        # Also remove a single leading echo of the question
+        text = re.sub(r'(?i)^\s*' + escaped + r'[?!.]?\s*\n', '', text)
+
+    # ── 3. Detect line-level repetition loops (any repeated line 3+ times) ───
+    lines = text.split('\n')
+    seen: dict = {}
+    deduped = []
+    for line in lines:
+        key = line.strip().lower()
+        if not key:
+            deduped.append(line)
+            continue
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] <= 2:   # allow up to 2 occurrences (e.g. section headers)
+            deduped.append(line)
+    text = '\n'.join(deduped)
+
+    # ── 4. If response still looks like a raw conversation dump, take the last
+    #       substantive paragraph after the final "assistant" role marker ──────
+    if text.count('\n') > 40:  # suspiciously long
+        # Try to find a clean final assistant block
+        for marker in ['assistant\n', 'ASSISTANT:\n', 'Assistant:\n']:
+            if marker in text:
+                text = text.split(marker)[-1].strip()
+                break
+
     return text.strip()
 
 
@@ -914,7 +980,7 @@ async def run_agent(user_message: str) -> dict:
     updates = final.get("status_updates", [])
     updates.append(f"✅ Done in {elapsed:.0f}s")
     return {
-        "response":        _clean_response(raw),
+        "response":        _clean_response(raw, user_message),
         "tools_used":      final.get("tool_calls_made", []),
         "iterations":      final.get("iteration", 0),
         "phase":           PHASE,
