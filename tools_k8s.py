@@ -181,7 +181,8 @@ def get_node_health() -> str:
         nodes = _core.list_node()
         if not nodes.items:
             return "No nodes found."
-        lines = ["Node health:"]
+        lines      = ["Node health:"]
+        gpu_nodes  = 0
         for node in nodes.items:
             roles    = [k.replace("node-role.kubernetes.io/", "")
                         for k in (node.metadata.labels or {})
@@ -190,11 +191,27 @@ def get_node_health() -> str:
             pressure = [t for t in ["MemoryPressure", "DiskPressure", "PIDPressure"]
                         if conds.get(t) == "True"]
             alloc    = node.status.allocatable or {}
+
+            # GPU detection: check allocatable resources for nvidia/amd GPUs
+            gpu_count = 0
+            for key in alloc:
+                if "nvidia.com/gpu" in key or "amd.com/gpu" in key:
+                    try:
+                        gpu_count += int(alloc[key])
+                    except (ValueError, TypeError):
+                        pass
+            if gpu_count:
+                gpu_nodes += 1
+
+            gpu_str = f" GPU:{gpu_count}" if gpu_count else ""
             lines.append(
                 f"  {node.metadata.name} [{','.join(roles)}]: "
                 f"Ready={conds.get('Ready','?')}"
                 + (f" ⚠ {','.join(pressure)}" if pressure else "")
-                + f" | CPU:{alloc.get('cpu','n/a')} Mem:{alloc.get('memory','n/a')}")
+                + f" | CPU:{alloc.get('cpu','n/a')} Mem:{alloc.get('memory','n/a')}"
+                + gpu_str)
+
+        lines.append(f"Summary: {len(nodes.items)} node(s) total, {gpu_nodes} with GPU(s).")
         return "\n".join(lines)
     except ApiException as e:
         return f"K8s API error: {e.reason}"
@@ -375,8 +392,7 @@ def get_pvc_status(namespace: str = "all") -> str:
 
     For a specific namespace: ALL PVCs are listed (Bound and non-Bound) so the
     LLM can accurately answer "what PVCs does <workload> have?" questions.
-    For namespace="all": Bound PVCs are summarised as a count to reduce noise;
-    only Pending/Lost/Unknown PVCs are shown in detail.
+    For namespace="all": Always leads with total count, then details non-Bound PVCs.
     """
     try:
         pvcs = (_core.list_persistent_volume_claim_for_all_namespaces()
@@ -386,9 +402,11 @@ def get_pvc_status(namespace: str = "all") -> str:
         if not pvcs.items:
             return f"No PVCs found in namespace '{namespace}'."
 
+        total = len(pvcs.items)
+
         # Specific namespace: always show every PVC so the LLM sees them all
         if namespace != "all":
-            lines = [f"PVCs in '{namespace}' ({len(pvcs.items)} total):"]
+            lines = [f"PVCs in '{namespace}' ({total} total):"]
             for pvc in pvcs.items:
                 phase = pvc.status.phase or "Unknown"
                 sc    = pvc.spec.storage_class_name or "default"
@@ -400,22 +418,24 @@ def get_pvc_status(namespace: str = "all") -> str:
                     f"capacity:{cap} | class:{sc} | volume:{vol}")
             return "\n".join(lines)
 
-        # All namespaces: detail only non-Bound, summarise Bound
-        lines = ["PVCs across all namespaces:"]
-        bound = 0
+        # All namespaces: always state total count first, then detail non-Bound
+        bound, non_bound = 0, []
         for pvc in pvcs.items:
             phase = pvc.status.phase or "Unknown"
             if phase == "Bound":
                 bound += 1
-                continue
-            sc  = pvc.spec.storage_class_name or "default"
-            cap = (pvc.status.capacity or {}).get("storage", "?")
-            lines.append(
-                f"  {pvc.metadata.namespace}/{pvc.metadata.name}: "
-                f"{phase} ⚠ | class:{sc} capacity:{cap}")
-        if bound:
-            lines.append(f"  ({bound} Bound PVCs healthy — omitted for brevity)")
-        return "\n".join(lines) if len(lines) > 1 else f"All {bound} PVCs are Bound (healthy) across all namespaces."
+            else:
+                sc  = pvc.spec.storage_class_name or "default"
+                cap = (pvc.status.capacity or {}).get("storage", "?")
+                non_bound.append(
+                    f"  {pvc.metadata.namespace}/{pvc.metadata.name}: "
+                    f"{phase} ⚠ | class:{sc} capacity:{cap}")
+
+        lines = [f"PVCs across all namespaces: {total} total ({bound} Bound, {len(non_bound)} non-Bound)."]
+        if non_bound:
+            lines.append("Non-Bound PVCs:")
+            lines.extend(non_bound)
+        return "\n".join(lines)
     except ApiException as e:
         return f"K8s API error (PVC listing): {e.reason}"
 
