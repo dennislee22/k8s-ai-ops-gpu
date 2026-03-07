@@ -683,9 +683,9 @@ def _get_resource_fns(resource: str):
     list_ns_fn(namespace, field_selector) -> items list in one namespace
     get_fn(name, namespace) -> single object
     """
-    r = resource.lower().rstrip("s")   # crude singularise for matching
+    r = resource.lower()   # FIXED: removed .rstrip("s")
     # pods
-    if r in ("pod", "po"):
+    if r in ("pod", "pods", "po"):
         return (
             lambda fs="": _paginate(_core.list_pod_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_core.list_namespaced_pod, ns, field_selector=fs),
@@ -693,7 +693,7 @@ def _get_resource_fns(resource: str):
             "Pod",
         )
     # deployments
-    if r in ("deployment", "deploy"):
+    if r in ("deployment", "deployments", "deploy"):
         return (
             lambda fs="": _paginate(_apps.list_deployment_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_apps.list_namespaced_deployment, ns, field_selector=fs),
@@ -701,7 +701,7 @@ def _get_resource_fns(resource: str):
             "Deployment",
         )
     # replicasets
-    if r in ("replicaset", "rs"):
+    if r in ("replicaset", "replicasets", "rs"):
         return (
             lambda fs="": _paginate(_apps.list_replica_set_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_apps.list_namespaced_replica_set, ns, field_selector=fs),
@@ -709,7 +709,7 @@ def _get_resource_fns(resource: str):
             "ReplicaSet",
         )
     # statefulsets
-    if r in ("statefulset", "sts"):
+    if r in ("statefulset", "statefulsets", "sts"):
         return (
             lambda fs="": _paginate(_apps.list_stateful_set_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_apps.list_namespaced_stateful_set, ns, field_selector=fs),
@@ -717,7 +717,7 @@ def _get_resource_fns(resource: str):
             "StatefulSet",
         )
     # daemonsets
-    if r in ("daemonset", "ds"):
+    if r in ("daemonset", "daemonsets", "ds"):
         return (
             lambda fs="": _paginate(_apps.list_daemon_set_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_apps.list_namespaced_daemon_set, ns, field_selector=fs),
@@ -725,7 +725,7 @@ def _get_resource_fns(resource: str):
             "DaemonSet",
         )
     # services
-    if r in ("service", "svc"):
+    if r in ("service", "services", "svc"):
         return (
             lambda fs="": _paginate(_core.list_service_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_core.list_namespaced_service, ns, field_selector=fs),
@@ -733,7 +733,7 @@ def _get_resource_fns(resource: str):
             "Service",
         )
     # configmaps
-    if r in ("configmap", "cm"):
+    if r in ("configmap", "configmaps", "cm"):
         return (
             lambda fs="": _paginate(_core.list_config_map_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_core.list_namespaced_config_map, ns, field_selector=fs),
@@ -741,7 +741,7 @@ def _get_resource_fns(resource: str):
             "ConfigMap",
         )
     # secrets
-    if r in ("secret",):
+    if r in ("secret", "secrets"):
         return (
             lambda fs="": _paginate(_core.list_secret_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_core.list_namespaced_secret, ns, field_selector=fs),
@@ -749,7 +749,7 @@ def _get_resource_fns(resource: str):
             "Secret",
         )
     # pvcs
-    if r in ("persistentvolumeclaim", "pvc"):
+    if r in ("persistentvolumeclaim", "persistentvolumeclaims", "pvc", "pvcs"):
         return (
             lambda fs="": _paginate(_core.list_persistent_volume_claim_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_core.list_namespaced_persistent_volume_claim, ns, field_selector=fs),
@@ -757,7 +757,7 @@ def _get_resource_fns(resource: str):
             "PersistentVolumeClaim",
         )
     # persistent volumes (cluster-scoped)
-    if r in ("persistentvolume", "pv"):
+    if r in ("persistentvolume", "persistentvolumes", "pv", "pvs"):
         return (
             lambda fs="": _paginate(_core.list_persistent_volume, field_selector=fs),
             None,   # cluster-scoped, no namespace variant
@@ -765,7 +765,7 @@ def _get_resource_fns(resource: str):
             "PersistentVolume",
         )
     # nodes (cluster-scoped)
-    if r in ("node", "no"):
+    if r in ("node", "nodes", "no"):
         return (
             lambda fs="": _paginate(_core.list_node, field_selector=fs),
             None,
@@ -773,7 +773,7 @@ def _get_resource_fns(resource: str):
             "Node",
         )
     # namespaces (cluster-scoped)
-    if r in ("namespace", "ns"):
+    if r in ("namespace", "namespaces", "ns"):
         return (
             lambda fs="": _paginate(_core.list_namespace, field_selector=fs),
             None,
@@ -781,7 +781,7 @@ def _get_resource_fns(resource: str):
             "Namespace",
         )
     # jobs
-    if r in ("job",):
+    if r in ("job", "jobs"):
         return (
             lambda fs="": _paginate(_batch.list_job_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_batch.list_namespaced_job, ns, field_selector=fs),
@@ -789,7 +789,7 @@ def _get_resource_fns(resource: str):
             "Job",
         )
     # cronjobs
-    if r in ("cronjob", "cj"):
+    if r in ("cronjob", "cronjobs", "cj"):
         return (
             lambda fs="": _paginate(_batch.list_cron_job_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_batch.list_namespaced_cron_job, ns, field_selector=fs),
@@ -797,7 +797,7 @@ def _get_resource_fns(resource: str):
             "CronJob",
         )
     # ingresses
-    if r in ("ingress", "ing"):
+    if r in ("ingress", "ingresses", "ing"):
         return (
             lambda fs="": _paginate(_net.list_ingress_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_net.list_namespaced_ingress, ns, field_selector=fs),
@@ -805,7 +805,7 @@ def _get_resource_fns(resource: str):
             "Ingress",
         )
     # HPAs
-    if r in ("horizontalpodautoscaler", "hpa"):
+    if r in ("horizontalpodautoscaler", "horizontalpodautoscalers", "hpa", "hpas"):
         return (
             lambda fs="": _paginate(_autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_autoscaling.list_namespaced_horizontal_pod_autoscaler, ns, field_selector=fs),
@@ -813,7 +813,7 @@ def _get_resource_fns(resource: str):
             "HorizontalPodAutoscaler",
         )
     # events
-    if r in ("event", "ev"):
+    if r in ("event", "events", "ev"):
         return (
             lambda fs="": _paginate(_core.list_event_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_core.list_namespaced_event, ns, field_selector=fs),
@@ -821,28 +821,28 @@ def _get_resource_fns(resource: str):
             "Event",
         )
     # roles / rolebindings / clusterroles
-    if r in ("role",):
+    if r in ("role", "roles"):
         return (
             lambda fs="": _paginate(_rbac.list_role_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_rbac.list_namespaced_role, ns, field_selector=fs),
             lambda name, ns: _rbac.read_namespaced_role(name, ns),
             "Role",
         )
-    if r in ("clusterrole",):
+    if r in ("clusterrole", "clusterroles"):
         return (
             lambda fs="": _paginate(_rbac.list_cluster_role, field_selector=fs),
             None,
             lambda name, ns: _rbac.read_cluster_role(name),
             "ClusterRole",
         )
-    if r in ("rolebinding",):
+    if r in ("rolebinding", "rolebindings"):
         return (
             lambda fs="": _paginate(_rbac.list_role_binding_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_rbac.list_namespaced_role_binding, ns, field_selector=fs),
             lambda name, ns: _rbac.read_namespaced_role_binding(name, ns),
             "RoleBinding",
         )
-    if r in ("clusterrolebinding",):
+    if r in ("clusterrolebinding", "clusterrolebindings"):
         return (
             lambda fs="": _paginate(_rbac.list_cluster_role_binding, field_selector=fs),
             None,
@@ -850,7 +850,7 @@ def _get_resource_fns(resource: str):
             "ClusterRoleBinding",
         )
     # serviceaccounts
-    if r in ("serviceaccount", "sa"):
+    if r in ("serviceaccount", "serviceaccounts", "sa"):
         return (
             lambda fs="": _paginate(_core.list_service_account_for_all_namespaces, field_selector=fs),
             lambda ns, fs="": _paginate(_core.list_namespaced_service_account, ns, field_selector=fs),
@@ -1624,7 +1624,7 @@ K8S_TOOLS: dict = {
     # ── Namespaces ────────────────────────────────────────────────────────────
     "get_namespace_status": {
         "fn":          get_namespace_status,
-        "description": "List all namespaces and their phase.",
+        "description": "List all namespaces and their phase. ALWAYS use this when the user asks 'how many namespaces', 'list namespaces', or wants a namespace count.",
         "parameters":  {},
     },
 }
