@@ -287,13 +287,13 @@ button{cursor:pointer;font-family:inherit}
     <div id="title-block">
       <div id="ttl" class="shiny">Cloudera ECS AI Ops</div>
       <div id="subtitle">
-        <span id="sub-txt">Air-gapped &middot; loading&hellip;</span>
+        <span id="sub-txt">Air-gapped &middot; connecting&hellip;</span>
         <!-- Tooltip trigger — click to open -->
         <button id="tt-btn" title="Click for model info">?</button>
       </div>
     </div>
     <div id="hdr-right">
-      <a id="email-link" href="/cdn-cgi/l/email-protection#7014151e1e19031c1515565346444b131c1f05141502115e131f1d">&#9993; dennislee&#64;cloudera.com</a>
+      <a id="email-link" href="mailto:dennislee@cloudera.com">&#9993; dennislee&#64;cloudera.com</a>
       <div id="theme-row">
         <span id="theme-label">THEME</span>
         <button class="tdot active" data-theme="midnight"
@@ -390,23 +390,26 @@ button{cursor:pointer;font-family:inherit}
           <span class="ph-title">INFERENCE</span>
           <div class="infer-badge">
             <div class="infer-dot" id="infer-dot-cpu" style="background:#64748b"></div>
-            <span id="infer-txt-cpu" style="color:var(--panelDim)">loading&hellip;</span>
+            <span id="infer-txt-cpu" style="color:var(--panelDim)">&#9881;&#65039; CPU</span>
           </div>
         </div>
       </div>
 
-      <!-- ── GPU Panel (shown only when GPUs present) ───────────────────── -->
-      <div class="panel" id="gpu-panel" style="display:none;flex-direction:column">
+      <!-- ── GPU Panel (always shown) ───────────────────────────────────── -->
+      <div class="panel" id="gpu-panel" style="display:flex;flex-direction:column">
         <div class="ph">
           <span class="ph-title">GPU MONITOR</span>
-          <span class="ph-sub" id="gpu-count-lbl"></span>
+          <span class="ph-sub" id="gpu-count-lbl">detecting&hellip;</span>
         </div>
         <div class="gpu-cards-wrap" id="gpu-cards"></div>
+        <div id="gpu-none-msg" style="display:none;padding:10px 12px;font-size:11px;color:var(--panelDim);font-family:'IBM Plex Mono',monospace;text-align:center">
+          No NVIDIA GPU detected &mdash; CPU inference mode
+        </div>
         <div class="pf">
           <span class="ph-title">INFERENCE</span>
-          <div class="infer-badge">
-            <div class="infer-dot" style="background:#22c55e;box-shadow:0 0 6px #22c55e88"></div>
-            <span style="color:#22c55e">&#9889; GPU</span>
+          <div class="infer-badge" id="gpu-infer-badge">
+            <div class="infer-dot" style="background:#64748b"></div>
+            <span style="color:var(--panelDim)" id="gpu-infer-txt">detecting&hellip;</span>
           </div>
         </div>
       </div>
@@ -415,7 +418,7 @@ button{cursor:pointer;font-family:inherit}
   </div><!-- #body -->
 </div><!-- #app -->
 
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script data-cfasync="false">
+<script>
 (function(){
 'use strict';
 
@@ -561,39 +564,50 @@ function updateInferenceBadge(){
   }
 }
 
-fetch('/health').then(r=>r.json()).then(d=>{
-  modelName = d.model || 'qwen2.5:7b';
-  isGpu     = (d.num_gpu || 0) > 0;
+async function fetchHealth(retries){
+  try{
+    const r = await fetch('/health');
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    modelName = d.model || 'qwen2.5:7b';
+    isGpu     = (d.num_gpu || 0) > 0;
 
-  document.getElementById('sub-txt').textContent =
-    'Air-gapped \u00b7 ' + modelName;
+    document.getElementById('sub-txt').textContent =
+      'Air-gapped \u00b7 ' + modelName;
 
-  const modeEl = document.getElementById('tt-mode');
-  modeEl.textContent = isGpu
-    ? '\uD83D\uDDA5\uFE0F  GPU Inference \u2014 Active'
-    : '\u2699\uFE0F  CPU Inference \u2014 Active';
-  modeEl.style.color = isGpu ? '#22c55e' : '#f59e0b';
+    const modeEl = document.getElementById('tt-mode');
+    modeEl.textContent = isGpu
+      ? '\uD83D\uDDA5\uFE0F  GPU Inference \u2014 Active'
+      : '\u2699\uFE0F  CPU Inference \u2014 Active';
+    modeEl.style.color = isGpu ? '#22c55e' : '#f59e0b';
 
-  document.getElementById('tt-model').textContent =
-    modelName + (d.model_source==='local_dir' ? ' (local)' : ' via Ollama');
-  document.getElementById('tt-embed').textContent =
-    d.embed_source==='local_dir' ? 'local sentence-transformers' : 'Ollama endpoint';
-  if(d.chroma_dir){
-    document.getElementById('tt-chroma').textContent = d.chroma_dir;
+    document.getElementById('tt-model').textContent =
+      modelName + (d.model_source==='local_dir' ? ' (local)' : ' via Ollama');
+    document.getElementById('tt-embed').textContent =
+      d.embed_source==='local_dir' ? 'local sentence-transformers' : 'Ollama endpoint';
+    if(d.chroma_dir){
+      document.getElementById('tt-chroma').textContent = d.chroma_dir;
+    }
+    const note = document.getElementById('tt-note');
+    if(!isGpu){
+      note.style.color = '#f59e0b';
+      note.textContent = '\u26A0 CPU mode \u2014 responses may take 30\u201390s.';
+    } else {
+      note.style.color = '#22c55e';
+      note.textContent = '\u2713 GPU acceleration active.';
+    }
+
+    updateInferenceBadge();
+  } catch(e){
+    if(retries > 0){
+      setTimeout(()=> fetchHealth(retries-1), 3000);
+      document.getElementById('sub-txt').textContent = 'Air-gapped \u00b7 connecting\u2026';
+    } else {
+      document.getElementById('sub-txt').textContent = 'Air-gapped \u00b7 backend unreachable';
+    }
   }
-  const note = document.getElementById('tt-note');
-  if(!isGpu){
-    note.style.color = '#f59e0b';
-    note.textContent = '\u26A0 CPU mode \u2014 responses may take 30\u201390s.';
-  } else {
-    note.style.color = '#22c55e';
-    note.textContent = '\u2713 GPU acceleration active.';
-  }
-
-  updateInferenceBadge();
-}).catch(()=>{
-  document.getElementById('sub-txt').textContent = 'Air-gapped \u00b7 backend unreachable';
-});
+}
+fetchHealth(10);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CHAT
@@ -844,6 +858,7 @@ const loadEl     = document.getElementById('load-avg');
 const gpuPanel   = document.getElementById('gpu-panel');
 const gpuCntEl   = document.getElementById('gpu-count-lbl');
 const gpuCardsEl = document.getElementById('gpu-cards');
+const gpuNoEl    = document.getElementById('gpu-none-msg');
 
 async function pollMetrics(){
   try{
@@ -881,12 +896,29 @@ async function pollMetrics(){
 
     // GPUs
     const gpus = d.gpus||[];
+    const gpuInferDot = document.querySelector('#gpu-infer-badge .infer-dot');
+    const gpuInferTxt = document.getElementById('gpu-infer-txt');
     if(gpus.length > 0){
       gpuPanel.style.display = 'flex';
       gpuCntEl.textContent   = gpus.length+' device'+(gpus.length>1?'s':'');
       renderGpus(gpuCardsEl, gpus);
+      gpuNoEl.style.display  = 'none';
+      if(gpuInferDot){ gpuInferDot.style.background='#22c55e'; gpuInferDot.style.boxShadow='0 0 6px #22c55e88'; }
+      if(gpuInferTxt){ gpuInferTxt.textContent='\u26A1 GPU'; gpuInferTxt.style.color='#22c55e'; }
+    } else if(d.num_gpu > 0) {
+      // GPU detected but pynvml not returning data yet
+      gpuPanel.style.display = 'flex';
+      gpuCntEl.textContent   = d.num_gpu+' device'+(d.num_gpu>1?'s':'');
+      gpuNoEl.style.display  = 'none';
+      if(gpuInferDot){ gpuInferDot.style.background='#22c55e'; gpuInferDot.style.boxShadow='0 0 6px #22c55e88'; }
+      if(gpuInferTxt){ gpuInferTxt.textContent='\u26A1 GPU'; gpuInferTxt.style.color='#22c55e'; }
     } else {
-      gpuPanel.style.display = 'none';
+      gpuPanel.style.display = 'flex';
+      gpuCardsEl.innerHTML   = '';
+      gpuCntEl.textContent   = 'none detected';
+      gpuNoEl.style.display  = 'block';
+      if(gpuInferDot){ gpuInferDot.style.background='#64748b'; gpuInferDot.style.boxShadow='none'; }
+      if(gpuInferTxt){ gpuInferTxt.textContent='\u2699\uFE0F CPU'; gpuInferTxt.style.color='var(--panelDim)'; }
     }
 
   } catch(_){ /* retry silently */ }
