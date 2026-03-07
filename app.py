@@ -460,10 +460,12 @@ DO NOT list kubectl commands. DO NOT explain what you would do. DO NOT say "I wo
 INSTEAD: call the appropriate tool immediately, then report what it returned.
 
 NAMESPACE DISCOVERY RULE (critical):
-- NEVER assume a namespace. If you are unsure which namespace a workload is in,
-  use kubectl_exec with "kubectl get pods -A | grep -i <name>" to find it first.
-- Example: for vault, run "kubectl get pods -A | grep -i vault" before querying
-  a specific namespace — vault may be in 'vault', 'vault-system', 'hashicorp', etc.
+- NEVER assume a namespace. For any workload, query its known namespace directly.
+- For Vault: ALWAYS use "kubectl get pods -n vault-system" first.
+  NEVER use "kubectl get pods -A | grep -i vault" — this matches unrelated pods
+  such as backup jobs and CronJobs whose names contain 'vault'.
+  If vault-system has no pods, try: kubectl get pods -A --no-headers | awk '$1~/^vault/'
+- Apply the same principle to any workload: query its specific namespace directly.
 
 POD LISTING RULE:
 - get_pod_status with show_all=false (default) returns ONLY unhealthy pods.
@@ -730,13 +732,15 @@ def build_agent():
         return "vault"  # default vault namespace name
 
     QUERY_DEFAULTS = [
-        # ── Vault: use kubectl_exec so namespace is not hardcoded ─────────────
-        # "is vault ok?", "vault status", "how many vault pods" etc.
-        # kubectl_exec searches all namespaces; the LLM sees real pod names + status.
+        # ── Vault: precise namespace-scoped queries ───────────────────────────
+        # Use two kubectl_exec calls: first discover the vault namespace, then
+        # query it directly. grep -i vault on -A output is too broad — it
+        # matches backup jobs and other pods whose names/events mention "vault".
+        # Instead: list pods in known vault namespaces explicitly.
         (["vault", "hashicorp", "unseal", "secret engine"],
-         [("kubectl_exec", {"command": "kubectl get pods -A | grep -i vault"}),
-          ("kubectl_exec", {"command": "kubectl get pvc  -A | grep -i vault"}),
-          ("get_events",   {"namespace": "all", "warning_only": False})]),
+         [("kubectl_exec", {"command": "kubectl get pods -n vault-system --no-headers 2>/dev/null || kubectl get pods -A --no-headers | awk '$1~/vault/{print}'"}),
+          ("kubectl_exec", {"command": "kubectl get pvc -n vault-system --no-headers 2>/dev/null || echo 'No vault-system namespace'"}),
+          ("get_events",   {"namespace": "vault-system", "warning_only": False})]),
 
         # ── "how many pods / list all pods" — always show_all=true ───────────
         (["how many pod", "list all pod", "list pod", "all pods", "count pod"],

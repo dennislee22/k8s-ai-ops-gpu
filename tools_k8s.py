@@ -566,25 +566,42 @@ def get_namespace_status() -> str:
     """
     List ALL namespaces and their phase/status.
 
-    Uses kubectl directly to bypass the Python SDK's silent pagination cap,
-    which can under-report namespace counts on large clusters.
+    Uses kubectl with --no-headers and --chunk-size=0 to bypass both kubectl
+    client-side pagination and the Python SDK's silent server-side page cap,
+    both of which caused under-reporting on large clusters (e.g. 2 or 27
+    returned instead of 41).
     """
-    result = kubectl_exec("kubectl get namespaces -o wide")
+    # --chunk-size=0 disables kubectl's client-side paging (fetches all at once)
+    # --no-headers removes the column header so every line is a real namespace
+    result = kubectl_exec("kubectl get namespaces --no-headers --chunk-size=0")
     if result.startswith("[ERROR]"):
-        # Fallback to SDK if kubectl is unavailable
+        # Fallback: SDK with an explicit high limit and server-side pagination loop
         try:
-            nss   = _core.list_namespace(limit=1000)
-            lines = [f"Namespaces (total: {len(nss.items)}):"]
-            for ns in nss.items:
-                phase = ns.status.phase or "Unknown"
-                lines.append(f"  {ns.metadata.name}: {phase}")
+            items  = []
+            _continue = None
+            while True:
+                kw  = {"limit": 500}
+                if _continue:
+                    kw["_continue"] = _continue
+                page = _core.list_namespace(**kw)
+                items.extend(page.items)
+                _continue = page.metadata._continue if page.metadata else None
+                if not _continue:
+                    break
+            if not items:
+                return "No namespaces found."
+            lines = [f"Namespaces (total: {len(items)}):"]
+            for ns in items:
+                lines.append(f"  {ns.metadata.name}: {ns.status.phase or 'Unknown'}")
             return "\n".join(lines)
         except ApiException as e:
             return f"K8s API error: {e.reason}"
-    # Prepend a total-count header so the LLM always sees the real number
-    rows = [r for r in result.strip().splitlines() if r and not r.startswith("NAME")]
-    header = f"Namespaces (total: {len(rows)}):\n"
-    return header + result
+
+    # kubectl output: each line is "<name>   <status>   <age>"
+    # Count non-empty lines → exact namespace count
+    ns_lines = [r for r in result.strip().splitlines() if r.strip()]
+    total    = len(ns_lines)
+    return f"Namespaces (total: {total}):\n{result}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
