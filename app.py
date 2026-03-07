@@ -503,15 +503,22 @@ CRITICAL RULES:
 4. NEVER suggest write operations (restart, delete, scale) — diagnose only.
 5. When asked about cluster health, call get_node_health AND get_pod_status AND get_events.
 6. For storage issues, ALWAYS check longhorn-system namespace.
+7. NEVER mention cgroup, cgroupv1, cgroupv2, or suggest migrating cgroup versions.
+   These are environment-level constraints — treat them as background noise, not actionable issues.
+8. DO NOT output a "Next Steps" section. Report findings only — what you found and what it means.
+   If follow-up investigation is needed, state it as a single inline observation, not a numbered list.
+9. DO NOT begin your response with "Based on the tool results" or reference tool call IDs.
+   Start directly with the findings.
 
 SITE-SPECIFIC RULES:
 {custom_rules}
 
 RESPONSE FORMAT:
 - Concise bullet points only. No lengthy paragraphs.
-- State what you found (from tool results), what it means, what to investigate next.
+- State what you found and what it means.
 - Skip sections with nothing to report.
 - Max ~300 words unless genuinely complex.
+- DO NOT add a "Next Steps" or "Investigation Steps" section.
 """
 
 RAG_INSTRUCTION = """
@@ -666,7 +673,31 @@ def build_agent():
     }
 
     # ── Default tool calls for common queries when model skips tool calling ──
+    #
+    # Vault-aware routing: "is vault ok?" → pods + PVCs + events in vault namespace.
+    # Matched BEFORE generic health/status to avoid being swallowed by that rule.
+    # Namespace search: checks both 'vault' and 'hashicorp' namespace patterns.
+    def _vault_namespace(user_msg: str) -> str:
+        """Return the vault namespace hint from the query, or empty string."""
+        lm = user_msg.lower()
+        # Explicit namespace hint: "vault in vault-system" etc.
+        import re
+        m = re.search(r"vault[- ](?:in[- ]|namespace[- ]|ns[- ])?([a-z][a-z0-9-]*)", lm)
+        if m:
+            ns = m.group(1)
+            if ns not in ("ok", "doing", "is", "pod", "pvc", "status", "health"):
+                return ns
+        return "vault"  # default vault namespace name
+
     QUERY_DEFAULTS = [
+        # ── Vault: check pods + PVCs + events in vault namespace ─────────────
+        # Triggers on "vault", "hashicorp", "secret engine", "unseal"
+        (["vault", "hashicorp", "unseal", "secret engine"],
+         [("get_pod_status",  {"namespace": "vault"}),
+          ("get_pvc_status",  {"namespace": "vault"}),
+          ("get_events",      {"namespace": "vault", "warning_only": False})]),
+
+        # ── Generic health / status ───────────────────────────────────────────
         (["health", "status", "check", "overview", "summary", "problem", "issue"],
          [("get_node_health", {}),
           ("get_pod_status", {"namespace": "all"}),
@@ -753,12 +784,18 @@ def build_agent():
         if not tool_results:
             return msgs   # nothing to rewrite
 
-        # Serialise tool results as readable text
-        parts = ["Here are the tool results:\n"]
+        # Serialise tool results — use clean section headers, no IDs or preamble
+        # The instruction wording here directly shapes how the model opens its reply.
+        parts = []
         for tr in tool_results:
-            parts.append(f"[{tr.tool_call_id}]\n{tr.content}\n")
-        parts.append("\nBased on the above results, answer the user question.")
-        return head + [HumanMessage(content="\n".join(parts))]
+            parts.append(f"Tool result:\n{tr.content}")
+        parts.append(
+            "\nUsing only the tool results above, provide a concise diagnosis. "
+            "Start directly with findings. "
+            "Do NOT begin with 'Based on the tool results'. "
+            "Do NOT add a Next Steps section."
+        )
+        return head + [HumanMessage(content="\n\n".join(parts))]
 
     def llm_node(state: AgentState):
         itr      = state.get("iteration", 0) + 1
