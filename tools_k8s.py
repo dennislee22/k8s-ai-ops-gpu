@@ -564,35 +564,18 @@ def get_cluster_role_bindings() -> str:
 
 def get_namespace_status() -> str:
     """
-    List ALL namespaces and their phase/status.
-    Uses kubectl --no-headers so every output line is a real namespace entry,
-    bypassing the SDK pagination cap that under-reported counts on large clusters.
+    List ALL namespaces and their phase/status via kubectl.
+
+    Uses kubectl directly — the Python SDK connects to a different context
+    and under-reports namespace counts. kubectl uses the same kubeconfig
+    as the operator's shell and always returns the correct full list.
     """
     result = kubectl_exec("kubectl get namespaces --no-headers")
-    if result.startswith("[ERROR]"):
-        # Fallback: SDK with full pagination loop
-        try:
-            items = []
-            _cont = None
-            while True:
-                kw = {"limit": 500}
-                if _cont:
-                    kw["_continue"] = _cont
-                page = _core.list_namespace(**kw)
-                items.extend(page.items)
-                _cont = (page.metadata._continue
-                         if page.metadata and page.metadata._continue else None)
-                if not _cont:
-                    break
-            if not items:
-                return "No namespaces found."
-            lines = [f"Namespaces (total: {len(items)}):"]
-            for ns in items:
-                lines.append(f"  {ns.metadata.name}: {ns.status.phase or 'Unknown'}")
-            return "\n".join(lines)
-        except ApiException as e:
-            return f"K8s API error: {e.reason}"
-    # Every non-empty line from --no-headers is one namespace
+    if result.startswith("[ERROR]") or "not found" in result.lower():
+        return (
+            f"kubectl is not accessible: {result}\n"
+            "Set KUBECTL_BIN=/path/to/kubectl in your env file to fix this."
+        )
     ns_lines = [r for r in result.strip().splitlines() if r.strip()]
     return f"Namespaces (total: {len(ns_lines)}):\n{result}"
 
@@ -651,6 +634,43 @@ _STREAMING_PATTERNS = [
 _KUBECTL_TIMEOUT   = int(os.getenv("KUBECTL_TIMEOUT",  "30"))
 _KUBECTL_MAX_OUT   = int(os.getenv("KUBECTL_MAX_CHARS", "8000"))
 _ALLOW_WRITES      = os.getenv("KUBECTL_ALLOW_WRITES", "false").lower() in ("1", "true", "yes")
+
+# ── Locate kubectl binary at module load time ──────────────────────────────────
+# subprocess with shell=True inherits a stripped PATH when run as a service.
+# Probe the most common install locations so we always use the absolute path.
+def _find_kubectl() -> str:
+    """Return the absolute path to kubectl, or just 'kubectl' as a fallback."""
+    # 1. Honour an explicit override
+    explicit = os.getenv("KUBECTL_BIN", "").strip()
+    if explicit:
+        return explicit
+    # 2. Check common install locations
+    for candidate in [
+        "/usr/local/bin/kubectl",
+        "/usr/bin/kubectl",
+        "/opt/homebrew/bin/kubectl",
+        "/snap/bin/kubectl",
+        os.path.expanduser("~/.local/bin/kubectl"),
+        os.path.expanduser("~/bin/kubectl"),
+    ]:
+        if Path(candidate).is_file():
+            _log.info(f"[kubectl] Found at: {candidate}")
+            return candidate
+    # 3. Try PATH lookup (works when PATH is set correctly)
+    try:
+        found = subprocess.check_output(
+            ["which", "kubectl"], text=True, timeout=3,
+            stderr=subprocess.DEVNULL
+        ).strip()
+        if found:
+            _log.info(f"[kubectl] Found via which: {found}")
+            return found
+    except Exception:
+        pass
+    _log.warning("[kubectl] Binary not found in common locations — falling back to 'kubectl'")
+    return "kubectl"
+
+_KUBECTL_BIN = _find_kubectl()
 
 
 def _kubectl_modifies_resource(command: str) -> str:
@@ -741,19 +761,29 @@ def kubectl_exec(command: str) -> str:
             "operator to set KUBECTL_ALLOW_WRITES=true."
         )
 
-    # ── 4. Build environment with KUBECONFIG ──────────────────────────────────
+    # ── 4. Build environment with KUBECONFIG + expanded PATH ─────────────────
     env = os.environ.copy()
+    # Ensure common binary locations are in PATH for any shell operators (||, |)
+    extra_paths = "/usr/local/bin:/usr/bin:/opt/homebrew/bin:/snap/bin"
+    env["PATH"] = extra_paths + ":" + env.get("PATH", "")
     kc_path = os.getenv("KUBECONFIG_PATH", "")
     if kc_path:
         expanded = os.path.expanduser(kc_path)
         if Path(expanded).exists():
             env["KUBECONFIG"] = expanded
 
-    # ── 5. Execute ────────────────────────────────────────────────────────────
-    _log.info(f"[kubectl_exec] Running: {command!r}")
+    # ── 5. Rewrite command to use absolute kubectl path ───────────────────────
+    # Replace leading 'kubectl' token with the resolved absolute path so the
+    # command works even when the service PATH doesn't include kubectl's directory.
+    abs_command = re.sub(r'^(sudo\s+)?kubectl\b',
+                         lambda m: (m.group(1) or '') + _KUBECTL_BIN,
+                         command, count=1)
+
+    # ── 6. Execute ────────────────────────────────────────────────────────────
+    _log.info(f"[kubectl_exec] Running: {abs_command!r}")
     try:
         result = subprocess.run(
-            command, shell=True, capture_output=True, text=True,
+            abs_command, shell=True, capture_output=True, text=True,
             env=env, timeout=_KUBECTL_TIMEOUT,
         )
         stdout = result.stdout or ""

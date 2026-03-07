@@ -70,6 +70,9 @@ os.environ.setdefault("LOG_LEVEL",       "INFO")
 os.environ.setdefault("CHROMA_DIR",      str(_HERE / "chromadb"))
 os.environ.setdefault("CUSTOM_RULES",
     "- Do NOT recommend migrating to cgroupv2. This environment uses cgroupv1.")
+# KUBECTL_BIN: override kubectl path when it's not on the service's PATH.
+# Example: KUBECTL_BIN=/usr/local/bin/kubectl
+# If unset, tools_k8s.py auto-probes common locations at startup.
 
 # ── Apply CLI overrides → env vars (CLI wins over env file) ──────────────────
 if _ARGS.model_dir:
@@ -627,33 +630,24 @@ def _build_llm():
                 device_map="auto" if NUM_GPU > 0 else "cpu",
                 dtype=torch.float16 if NUM_GPU > 0 else torch.float32,
             )
-            # Override generation defaults cleanly via GenerationConfig
             from transformers import GenerationConfig
             pipe.model.generation_config = GenerationConfig(
-                max_new_tokens=1024,
-                temperature=0.1,
-                repetition_penalty=1.1,
+                max_new_tokens=2048,      # enough for multi-tool answers
+                temperature=0.05,         # near-deterministic for factual ops queries
+                repetition_penalty=1.15,  # stronger penalty to reduce echoing
                 do_sample=True,
             )
             llm = ChatHuggingFace(llm=HuggingFacePipeline(pipeline=pipe))
             _log_ag.info("[LLM] ChatHuggingFace ready (supports tool calling)")
             return llm
-        except ImportError:
-            _log_ag.warning(
-                "[LLM] langchain-huggingface / transformers not installed — "
-                "install with: pip install -U langchain-huggingface transformers torch accelerate\n"
-                "       Falling back to Ollama with local path.")
+        except ImportError as exc:
+            _log_ag.error(
+                f"[LLM] langchain-huggingface / transformers not installed: {exc}\n"
+                "Install with: pip install -U langchain-huggingface transformers torch accelerate")
+            raise
         except Exception as e:
-            _log_ag.warning(f"[LLM] HuggingFace load failed ({e}) — "
-                            "falling back to Ollama with local path")
-
-        from langchain_ollama import ChatOllama
-        _log_ag.info(f"[LLM] Ollama(local path): {model_dir}")
-        return ChatOllama(
-            model=model_dir, base_url=OLLAMA_BASE_URL,
-            temperature=0.1, num_ctx=NUM_CTX,
-            num_thread=NUM_THREAD, num_gpu=NUM_GPU, repeat_penalty=1.1,
-        )
+            _log_ag.error(f"[LLM] HuggingFace load failed: {e}")
+            raise
 
     from langchain_ollama import ChatOllama
     _log_ag.info(f"[LLM] Ollama: model={LLM_MODEL} ctx={NUM_CTX} "
@@ -810,19 +804,43 @@ def build_agent():
                 return calls
         return [("get_node_health", {}), ("get_pod_status", {"namespace": "all"})]
 
+    # ── HuggingFace detection ─────────────────────────────────────────────────
+    # When using --model-dir / LLM_MODEL_DIR, the LLM is always ChatHuggingFace.
+    # bind_tools() wraps it in a RunnableBinding so isinstance() on the top-level
+    # object returns False — we must unwrap several layers.
+    # As a reliable fallback: if LLM_MODEL_DIR is set, it IS HuggingFace.
+    _is_hf = bool(os.getenv("LLM_MODEL_DIR", "").strip())
+    if not _is_hf:
+        try:
+            from langchain_huggingface import ChatHuggingFace as _CHF
+            _raw = llm
+            # Unwrap RunnableBinding / RunnableSequence layers
+            for _ in range(10):
+                if hasattr(_raw, "bound"):
+                    _raw = _raw.bound
+                elif hasattr(_raw, "first"):
+                    _raw = _raw.first
+                else:
+                    break
+            _is_hf = isinstance(_raw, _CHF)
+        except ImportError:
+            pass
+    _log_ag.info(f"[LLM] HuggingFace/Transformers mode: {_is_hf}")
+
     def _prepare_messages_for_hf(msgs: list) -> list:
         """
-        Rewrite trailing ToolMessages into a clean HumanMessage so that
-        apply_chat_template gets a valid human/assistant sequence.
+        Rewrite trailing ToolMessages for ChatHuggingFace / apply_chat_template.
 
-        Applied for ALL model types: Ollama Qwen also echoes the instruction
-        string when it appears inside a HumanMessage, causing the visible
-        "Using only the tool results above..." loop in responses.
+        Qwen's chat template does not understand ToolMessage objects. It needs
+        the conversation structured as alternating human/assistant turns.
+        We collapse everything into two messages:
+          [0] HumanMessage  — original user question
+          [1] HumanMessage  — tool results wrapped in <tool_response> tags,
+                              followed by a brief instruction so Qwen knows
+                              these are data to synthesise, not text to echo.
 
-        Strategy:
-          - HumanMessage 1: original user question (unchanged)
-          - HumanMessage 2: tool results ONLY — no inline instructions
-            (the SystemMessage already contains all formatting rules)
+        The <tool_response> tags match Qwen's own tool-call format and prevent
+        the model from treating the results as a new user question.
         """
         if not msgs:
             return msgs
@@ -834,31 +852,26 @@ def build_agent():
             tool_results.insert(0, head.pop())
 
         if not tool_results:
-            # No tool results yet — strip AIMessages to avoid template echo
+            # No tool results yet — pass only HumanMessages to avoid template errors
             human_only = [m for m in msgs if isinstance(m, HumanMessage)]
             return human_only if human_only else msgs
 
-        # Original user question
         original_question = next(
             (m.content for m in msgs if isinstance(m, HumanMessage)
              and isinstance(m.content, str)), "")
 
-        # Tool results ONLY — no instruction text (SystemMessage handles that)
+        # Wrap each result in <tool_response> so Qwen treats it as data
         parts = []
-        for tr in tool_results:
-            body = (tr.content if len(tr.content) <= 3000
-                    else tr.content[:3000] + "\n...[truncated]")
-            parts.append(f"Tool result:\n{body}")
+        for i, tr in enumerate(tool_results, 1):
+            body = (tr.content if len(tr.content) <= 2500
+                    else tr.content[:2500] + "\n...[truncated]")
+            parts.append(f"<tool_response id=\"{i}\">\n{body}\n</tool_response>")
+
+        # Single compact instruction — short enough that Qwen won't echo it
+        parts.append("Summarise the above tool results to answer the question. Be concise.")
 
         tool_summary = HumanMessage(content="\n\n".join(parts))
-
-        # Return: [original question] + [tool results]
-        # The SystemMessage prepended by llm_node carries all formatting rules.
         return [HumanMessage(content=original_question), tool_summary]
-
-    # Apply _prepare_messages_for_hf for ALL model types — Ollama Qwen echoes
-    # instruction strings in HumanMessages the same way ChatHuggingFace does.
-    _log_ag.info("[LLM] Message rewriting: always ON (prevents Qwen echo loops)")
 
     def llm_node(state: AgentState):
         itr      = state.get("iteration", 0) + 1
@@ -866,9 +879,8 @@ def build_agent():
         updates  = list(state.get("status_updates", []))
         sys_msg  = SystemMessage(content=prompt)
 
-        # Always rewrite ToolMessages into clean HumanMessage pairs.
-        # Prevents Ollama Qwen from echoing instruction strings back.
-        invoke_msgs = _prepare_messages_for_hf(msgs)
+        # Rewrite ToolMessages for HuggingFace only — Ollama handles them natively
+        invoke_msgs = _prepare_messages_for_hf(msgs) if _is_hf else msgs
         response = llm.invoke([sys_msg] + invoke_msgs)
         tcs      = getattr(response, "tool_calls", None) or []
 
@@ -966,7 +978,7 @@ def _clean_response(text: str, user_question: str = "") -> str:
 
     This function applies layered cleanup to extract the real assistant answer.
     """
-    # ── 1. Strip complete im_start/im_end blocks ──────────────────────────────
+    # ── 1. Strip chat-template tokens and tool-response XML tags ─────────────
     text = re.sub(r'<\|im_start\|>\w+\s*\n?[\s\S]*?<\|im_end\|>\n?', '', text)
     if '<|im_start|>' in text:
         last = text.split('<|im_start|>')[-1]
@@ -975,6 +987,12 @@ def _clean_response(text: str, user_question: str = "") -> str:
     for tok in ['<|im_end|>', '<s>', '</s>', '[INST]', '[/INST]',
                 '<<SYS>>', '<</SYS>>']:
         text = text.replace(tok, '')
+    # Strip any <tool_response> blocks the model echoed back
+    text = re.sub(r'<tool_response[^>]*>[\s\S]*?</tool_response>', '', text)
+    # Strip bare "Tool result:" prefixes
+    text = re.sub(r'^Tool result:\s*', '', text, flags=re.MULTILINE)
+    # Strip the trailing instruction we inject
+    text = re.sub(r'Summarise the above tool results.*', '', text, flags=re.IGNORECASE)
 
     # ── 2. Strip conversation-echo: repeated user question lines ─────────────
     if user_question:
