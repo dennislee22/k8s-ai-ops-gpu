@@ -467,7 +467,7 @@ NAMESPACE DISCOVERY RULE (critical):
 - For Vault: ALWAYS use "kubectl get pods -n vault-system" first.
   NEVER use "kubectl get pods -A | grep -i vault" — this matches unrelated pods
   such as backup jobs and CronJobs whose names contain 'vault'.
-  If vault-system has no pods, try: kubectl get pods -A --no-headers | awk '$1~/^vault/'
+  If vault-system has no pods, use get_pod_status with namespace='all' and show_all=True, then filter by namespace in the response.
 - Apply the same principle to any workload: query its specific namespace directly.
 
 POD LISTING RULE:
@@ -727,14 +727,14 @@ def build_agent():
 
     QUERY_DEFAULTS = [
         # ── Vault: precise namespace-scoped queries ───────────────────────────
-        # Use two kubectl_exec calls: first discover the vault namespace, then
-        # query it directly. grep -i vault on -A output is too broad — it
-        # matches backup jobs and other pods whose names/events mention "vault".
-        # Instead: list pods in known vault namespaces explicitly.
+        # Use get_pod_status with show_all=True — kubectl_exec does NOT support
+        # shell operators (||, awk, 2>/dev/null) since it uses the Python K8s
+        # API client directly, not a real shell. Shell-pipe commands silently
+        # fail and the LLM receives empty/error output, causing hallucinations.
         (["vault", "hashicorp", "unseal", "secret engine"],
-         [("kubectl_exec", {"command": "kubectl get pods -n vault-system --no-headers 2>/dev/null || kubectl get pods -A --no-headers | awk '$1~/vault/{print}'"}),
-          ("kubectl_exec", {"command": "kubectl get pvc -n vault-system --no-headers 2>/dev/null || echo 'No vault-system namespace'"}),
-          ("get_events",   {"namespace": "vault-system", "warning_only": False})]),
+         [("get_pod_status", {"namespace": "vault-system", "show_all": True}),
+          ("get_pvc_status",  {"namespace": "vault-system"}),
+          ("get_events",      {"namespace": "vault-system", "warning_only": False})]),
 
         # ── "how many pods / list all pods" — always show_all=true ───────────
         (["how many pod", "list all pod", "list pod", "all pods", "count pod"],

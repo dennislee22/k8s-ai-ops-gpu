@@ -1383,6 +1383,20 @@ def kubectl_exec(command: str) -> str:
     if not re.match(r"^kubectl(\s|$)", command):
         return "[ERROR] Command must start with 'kubectl'."
 
+    # ── Shell operators are NOT supported ────────────────────────────────────
+    # kubectl_exec uses the Python Kubernetes API client, not a real shell.
+    # Shell constructs (||, &&, |, >, awk, grep, sed) will be silently
+    # misinterpreted or ignored. Detect and reject them early with a clear
+    # message so the LLM can retry with a supported API-native command.
+    _SHELL_OPS = re.compile(r'(\|\||&&|(?<!<)>(?!>)|\bawk\b|\bgrep\b|\bsed\b|\bcut\b|\bwc\b|2>/dev/null)')
+    if _SHELL_OPS.search(command):
+        return (
+            "[ERROR] Shell operators and pipes (||, &&, |, awk, grep, 2>/dev/null) are NOT "
+            "supported by kubectl_exec — it uses the Kubernetes Python API directly. "
+            "Please use a dedicated tool instead: get_pod_status(namespace=..., show_all=True), "
+            "get_pvc_status(namespace=...), get_events(namespace=...), etc."
+        )
+
     p = _parse_kubectl(command)
     verb = p["verb"]
 
@@ -1575,6 +1589,9 @@ K8S_TOOLS["kubectl_exec"] = {
     "description": (
         "Execute a kubectl-style command against the remote cluster. "
         "Uses the Kubernetes Python API client directly — no local kubectl binary needed. "
+        "CRITICAL: Shell operators are NOT supported. Do NOT use: ||, &&, |, awk, grep, "
+        "sed, cut, wc, 2>/dev/null, or any shell pipe/redirect. "
+        "For vault/namespace pods, use get_pod_status(namespace='vault-system', show_all=True) instead. "
         "Use for: custom resources (CRDs) like Longhorn volumes/replicas/engines, "
         "rollout history/status, top nodes/pods (requires metrics-server), "
         "auth can-i, api-resources, version, and ad-hoc diagnostics. "
