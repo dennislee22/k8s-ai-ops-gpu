@@ -492,6 +492,14 @@ RBAC:
 - get_service_accounts       → call for permission or identity questions
 - get_cluster_role_bindings  → call to audit broad cluster-wide permissions
 
+kubectl (flexible):
+- kubectl_exec               → use for ANY kubectl operation not covered above:
+                               CRDs, Longhorn volumes/replicas/engines, rollout history,
+                               top nodes/pods, auth can-i, api-resources, diff, and
+                               any ad-hoc read-only diagnostic command.
+                               Always pass the full command: 'kubectl get pods -n default'.
+                               Write operations are blocked unless the operator enables them.
+
 RAG:
 - search_documentation       → call to cross-reference known issues and runbooks
 {rag_instruction}
@@ -670,6 +678,8 @@ def build_agent():
         "get_namespace_status":      "🗂️  Checking namespaces",
         # RAG
         "search_documentation":      "📚 Searching knowledge base",
+        # kubectl_exec
+        "kubectl_exec":              "⚡ Running kubectl command",
     }
 
     # ── Default tool calls for common queries when model skips tool calling ──
@@ -743,6 +753,15 @@ def build_agent():
         (["log"],
          [("get_pod_status", {"namespace": "all"}),
           ("get_events", {"namespace": "all"})]),
+        # kubectl_exec-backed defaults — CRDs, Longhorn volumes, resource usage
+        (["longhorn volume", "volume.longhorn", "replica", "engine image"],
+         [("kubectl_exec", {"command": "kubectl get volumes.longhorn.io -n longhorn-system"}),
+          ("get_events",   {"namespace": "longhorn-system"})]),
+        (["rollout history", "revision", "previous version", "rollback"],
+         [("kubectl_exec", {"command": "kubectl rollout history deployments --all-namespaces=true"})]),
+        (["top node", "top pod", "cpu usage", "memory usage", "resource usage"],
+         [("kubectl_exec", {"command": "kubectl top nodes"}),
+          ("get_node_health", {})]),
     ]
 
     def _default_tools_for(user_msg: str):

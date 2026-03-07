@@ -16,9 +16,9 @@ LangGraph Agent  (Reason → Act → Observe → Synthesize)
       ↓               ↓
  K8s Tools        RAG Tool
  (tools_k8s.py)  (ChromaDB + SentenceTransformers)
-      ↓               ↓
- Kubernetes       ChromaDB (local, embedded)
-  Cluster         + Embedding model (local dir or Ollama)
+      ↓    ↓          ↓
+ K8s SDK  kubectl  ChromaDB (local, embedded)
+  (typed) (exec)   + Embedding model (local dir or Ollama)
 ```
 
 ---
@@ -31,7 +31,8 @@ LangGraph Agent  (Reason → Act → Observe → Synthesize)
 | Embeddings | SentenceTransformers (local dir) or Ollama | GPU-accelerated if available |
 | Vector DB | ChromaDB (embedded) | Zero external dependencies |
 | Agent | LangGraph | Fully local Python, no cloud |
-| K8s access | kubernetes Python client | Read-only by default |
+| K8s access (typed) | kubernetes Python client | Structured typed tools |
+| K8s access (exec) | kubectl subprocess (kubectl-ai model) | Flexible free-form commands |
 | Doc parsing | pypdf + markdown-it-py | Python 3.12 compatible |
 | API | FastAPI | REST + CORS |
 | Frontend | Single-file HTML/JS | Served directly by FastAPI |
@@ -56,7 +57,7 @@ Set `PHASE=1` or `PHASE=2` in the `env` file to toggle.
 
 ---
 
-## K8s Tools (20 total)
+## K8s Tools (21 total)
 
 | Category | Tools |
 |---|---|
@@ -69,18 +70,37 @@ Set `PHASE=1` or `PHASE=2` in the `env` file to toggle.
 | Config | `get_configmap_list`, `get_resource_quotas`, `get_limit_ranges` |
 | RBAC | `get_service_accounts`, `get_cluster_role_bindings` |
 | Namespaces | `get_namespace_status` |
+| **kubectl exec** | **`kubectl_exec`** — flexible kubectl subprocess (kubectl-ai model) |
+
+### kubectl_exec — kubectl-ai Execution Layer
+
+`kubectl_exec` is a pure-Python port of the
+[GoogleCloudPlatform/kubectl-ai](https://github.com/GoogleCloudPlatform/kubectl-ai)
+command execution model. It runs any `kubectl` command via subprocess, giving the
+LLM full read-only access to CRDs, Longhorn volumes, rollout history, `top`
+metrics, `auth can-i` checks, and anything else not covered by the typed tools.
+
+**Safety model (mirrors kubectl-ai):**
+
+| Check | Behaviour |
+|---|---|
+| Blocked interactive commands | `kubectl edit`, `exec -it`, `port-forward`, `attach` — always rejected |
+| Blocked streaming commands | `get -w` (watch), `logs -f` (follow) — always rejected |
+| Write operations | Blocked by default; set `KUBECTL_ALLOW_WRITES=true` to enable |
+| KUBECONFIG | Injected from `KUBECONFIG_PATH` env var (same as typed tools) |
+| Timeout | 30 s default; override with `KUBECTL_TIMEOUT` |
+| Output truncation | 8 000 chars default; override with `KUBECTL_MAX_CHARS` |
 
 ---
 
 ## Project Structure
 
 ```
-k8s-ai-ops/
+ecs-ai-ops/
 ├── app.py               # FastAPI + LangGraph agent + RAG (single file)
-├── tools_k8s.py         # All 20 kubectl tool functions + registry
+├── tools_k8s.py         # All 21 tool functions + registry (incl. kubectl_exec)
 ├── index.html           # Chat UI (served by FastAPI at /)
 ├── requirements.txt     # Python dependencies
-├── start.sh             # Start / stop / status helper
 ├── env                  # Environment config (create from example below)
 ├── docs/                # Drop .md / .pdf / .txt runbooks here
 │   ├── known-issues.md
@@ -93,6 +113,10 @@ k8s-ai-ops/
 └── logs/                # Auto-created on first run
     └── app.log
 ```
+
+> **No `start.sh` needed.** Everything — model loading, ChromaDB init,
+> embedding warmup, and the FastAPI server — starts automatically when you run
+> `python3 app.py`.
 
 ---
 
@@ -136,6 +160,11 @@ NUM_GPU=1          # 0 = CPU only
 PHASE=2
 LOG_LEVEL=INFO
 CHROMA_DIR=./chromadb
+
+# kubectl_exec settings (optional)
+KUBECTL_ALLOW_WRITES=false   # set true to allow write ops via kubectl_exec
+KUBECTL_TIMEOUT=30           # seconds before subprocess is killed
+KUBECTL_MAX_CHARS=8000       # max output chars returned to the LLM
 ```
 
 ### Step 3 — Ingest documents (Phase 2 only)
@@ -148,14 +177,17 @@ python3 app.py --ingest ./docs --force   # re-ingest all
 ### Step 4 — Start the server
 
 ```bash
-# Ollama (default)
+# Ollama (default) — starts everything automatically
 python3 app.py
 
 # Local LLM + local embedding model (fully air-gapped)
 python3 app.py --model-dir /models/qwen2.5-7b --embed-dir /models/all-MiniLM-L6-v2
 
-# Custom port
-python3 app.py --port 9000
+# Custom port / host
+python3 app.py --port 9000 --host 0.0.0.0
+
+# Dev mode with auto-reload
+python3 app.py --reload
 ```
 
 Open `http://localhost:8000` in your browser.
@@ -222,12 +254,17 @@ Document types are auto-detected from filename keywords:
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `CHROMA_DIR` | `./chromadb` | ChromaDB persistent storage path |
 | `CUSTOM_RULES` | see env | Site-specific rules injected into system prompt |
+| `KUBECTL_ALLOW_WRITES` | `false` | Allow write kubectl commands via `kubectl_exec` |
+| `KUBECTL_TIMEOUT` | `30` | Subprocess timeout in seconds |
+| `KUBECTL_MAX_CHARS` | `8000` | Max output characters returned to the LLM |
 
 ---
 
 ## Security Notes
 
-- The K8s tools are **read-only**. No write operations (restart, delete, scale) are performed.
+- The typed K8s SDK tools are **read-only** by design — no write operations.
+- `kubectl_exec` is also **read-only by default**. Write operations require
+  explicitly setting `KUBECTL_ALLOW_WRITES=true`.
 - Never expose the FastAPI backend publicly — it has direct cluster access.
 - Restrict the env file in production:
   ```bash

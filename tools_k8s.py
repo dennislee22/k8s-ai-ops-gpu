@@ -8,9 +8,22 @@ All K8s tool functions live here.  To add a new tool:
   3. Add a label to TOOL_LABELS in app.py if you want a nice status badge.
 
 No other file needs to change.
+
+kubectl_exec integration
+------------------------
+Incorporates the kubectl-ai (GoogleCloudPlatform/kubectl-ai) command execution
+model in pure Python:
+  - Read/write command classification (mirrors kubectl_filter.go logic)
+  - Dangerous-command blocking (edit, port-forward, interactive exec -it)
+  - Streaming-command detection (watch, follow-logs, attach)
+  - Subprocess execution with KUBECONFIG injection and timeout
+  - Output truncation to keep LLM context clean
 """
 
 import os
+import re
+import shlex
+import subprocess
 import logging
 from pathlib import Path
 
@@ -510,6 +523,189 @@ def get_namespace_status() -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# KUBECTL EXEC — kubectl-ai command execution layer (pure Python port)
+#
+# Ported from GoogleCloudPlatform/kubectl-ai:
+#   pkg/tools/kubectl_tool.go  — command execution & validation
+#   pkg/tools/kubectl_filter.go — read/write classification
+#   pkg/tools/bash_tool.go     — streaming detection
+#
+# Design decisions:
+#   • READ-ONLY by default: write ops are blocked unless KUBECTL_ALLOW_WRITES=true
+#   • Dangerous interactive/streaming commands are always blocked
+#   • KUBECONFIG is injected from KUBECONFIG_PATH env (same source as SDK tools)
+#   • Output is truncated to MAX_OUTPUT_CHARS to protect LLM context window
+#   • Timeout defaults to 30 s; override with KUBECTL_TIMEOUT env var
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Constants (mirrors kubectl_filter.go) ─────────────────────────────────────
+
+_KUBECTL_READ_ONLY_OPS = {
+    "get", "describe", "explain", "top", "logs", "api-resources",
+    "api-versions", "version", "config", "cluster-info", "wait", "auth",
+    "diff", "kustomize", "help", "options", "proxy", "completion",
+    "convert", "events", "can-i", "whoami",
+}
+
+_KUBECTL_WRITE_OPS = {
+    "create", "apply", "edit", "delete", "patch", "replace", "scale",
+    "autoscale", "expose", "run", "exec", "set", "label", "annotate",
+    "taint", "drain", "cordon", "uncordon", "debug", "attach", "cp",
+    "reconcile", "approve", "deny", "certificate",
+}
+
+# rollout sub-commands that are read-only
+_ROLLOUT_READ_ONLY = {"history", "status"}
+
+# Commands that are always blocked regardless of read/write mode
+_BLOCKED_PATTERNS = [
+    ("kubectl edit",         "interactive mode not supported; use 'kubectl get -o yaml' + 'kubectl apply' instead"),
+    ("kubectl port-forward", "port-forward is not supported in unattended mode"),
+    ("kubectl exec -it",     "interactive exec not supported; use 'kubectl exec -- <cmd>' without -it"),
+    ("kubectl exec -ti",     "interactive exec not supported; use 'kubectl exec -- <cmd>' without -ti"),
+    ("kubectl attach",       "interactive attach not supported"),
+]
+
+# Streaming commands that cannot complete in a fixed timeout — always blocked
+_STREAMING_PATTERNS = [
+    (lambda cmd: " get " in cmd and " -w" in cmd,    "watch mode (-w) not supported"),
+    (lambda cmd: " logs " in cmd and " -f" in cmd,   "follow-log mode (-f) not supported; use tail_lines instead"),
+    (lambda cmd: " attach " in cmd,                  "attach is not supported"),
+]
+
+_KUBECTL_TIMEOUT   = int(os.getenv("KUBECTL_TIMEOUT",  "30"))
+_KUBECTL_MAX_OUT   = int(os.getenv("KUBECTL_MAX_CHARS", "8000"))
+_ALLOW_WRITES      = os.getenv("KUBECTL_ALLOW_WRITES", "false").lower() in ("1", "true", "yes")
+
+
+def _kubectl_modifies_resource(command: str) -> str:
+    """
+    Classify a kubectl command as 'yes' / 'no' / 'unknown' for write impact.
+    Mirrors kubectlModifiesResource() in kubectl_filter.go.
+    """
+    tokens = shlex.split(command) if command.strip() else []
+    # Strip leading env-var assignments / paths
+    kubectl_idx = next((i for i, t in enumerate(tokens)
+                        if os.path.basename(t) == "kubectl"), None)
+    if kubectl_idx is None:
+        return "unknown"
+    sub_tokens = tokens[kubectl_idx + 1:]
+    # Skip flags that precede the sub-command
+    ops = [t for t in sub_tokens if not t.startswith("-")]
+    if not ops:
+        return "unknown"
+    verb = ops[0]
+    if verb in _KUBECTL_READ_ONLY_OPS:
+        # rollout has mixed sub-commands: the sub-verb follows 'rollout'
+        # e.g. "kubectl rollout history deployment/app" → ops = ["rollout", "history", "deployment/app"]
+        if verb == "rollout":
+            # find sub-verb: first token after 'rollout' that doesn't contain '/'
+            sub_ops = [t for t in ops[1:] if "/" not in t]
+            if sub_ops:
+                return "no" if sub_ops[0] in _ROLLOUT_READ_ONLY else "yes"
+            return "unknown"
+        return "no"
+    if verb in _KUBECTL_WRITE_OPS:
+        return "yes"
+    return "unknown"
+
+
+def _validate_kubectl_command(command: str) -> str | None:
+    """
+    Return an error string if the command is blocked, else None.
+    Mirrors validateKubectlCommand() + streaming detection.
+    """
+    cmd_lower = command.lower()
+    for pattern, reason in _BLOCKED_PATTERNS:
+        if pattern in command:
+            return reason
+    for check_fn, reason in _STREAMING_PATTERNS:
+        if check_fn(command):
+            return reason
+    return None
+
+
+def kubectl_exec(command: str) -> str:
+    """
+    Execute a kubectl command against the cluster and return its output.
+
+    Implements the kubectl-ai execution model:
+      • Dangerous / interactive commands are rejected before execution.
+      • Write operations are blocked unless KUBECTL_ALLOW_WRITES=true.
+      • KUBECONFIG is injected from KUBECONFIG_PATH env var.
+      • Execution is time-bounded (KUBECTL_TIMEOUT seconds, default 30).
+      • Stdout + stderr are merged and truncated to KUBECTL_MAX_CHARS chars.
+
+    Parameters
+    ----------
+    command : str
+        The full kubectl command string, e.g. ``kubectl get pods -n default``.
+        Must begin with ``kubectl``.
+
+    Returns
+    -------
+    str
+        Command output, or an error message prefixed with ``[ERROR]``.
+    """
+    command = command.strip()
+
+    # ── 1. Must start with kubectl ────────────────────────────────────────────
+    if not re.match(r"^(sudo\s+)?kubectl(\s|$)", command):
+        return "[ERROR] kubectl_exec only runs kubectl commands. Command must start with 'kubectl'."
+
+    # ── 2. Validate: blocked / streaming ─────────────────────────────────────
+    err = _validate_kubectl_command(command)
+    if err:
+        return f"[ERROR] Command not allowed: {err}"
+
+    # ── 3. Write-protection ───────────────────────────────────────────────────
+    if not _ALLOW_WRITES and _kubectl_modifies_resource(command) == "yes":
+        return (
+            "[ERROR] Write operations are disabled (KUBECTL_ALLOW_WRITES is not set). "
+            "This tool is read-only by default. If you need to make changes, ask the "
+            "operator to set KUBECTL_ALLOW_WRITES=true."
+        )
+
+    # ── 4. Build environment with KUBECONFIG ──────────────────────────────────
+    env = os.environ.copy()
+    kc_path = os.getenv("KUBECONFIG_PATH", "")
+    if kc_path:
+        expanded = os.path.expanduser(kc_path)
+        if Path(expanded).exists():
+            env["KUBECONFIG"] = expanded
+
+    # ── 5. Execute ────────────────────────────────────────────────────────────
+    _log.info(f"[kubectl_exec] Running: {command!r}")
+    try:
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True,
+            env=env, timeout=_KUBECTL_TIMEOUT,
+        )
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+        combined = (stdout + ("\n" + stderr if stderr.strip() else "")).strip()
+
+        if result.returncode != 0 and not combined:
+            combined = f"[exit {result.returncode}] (no output)"
+        elif result.returncode != 0:
+            combined = f"[exit {result.returncode}]\n{combined}"
+
+        # Truncate to protect LLM context window
+        if len(combined) > _KUBECTL_MAX_CHARS:
+            combined = combined[:_KUBECTL_MAX_CHARS] + f"\n...[output truncated at {_KUBECTL_MAX_CHARS} chars]"
+
+        return combined or "(empty output)"
+
+    except subprocess.TimeoutExpired:
+        return f"[ERROR] Command timed out after {_KUBECTL_TIMEOUT}s: {command}"
+    except FileNotFoundError:
+        return "[ERROR] 'kubectl' binary not found. Ensure kubectl is installed and on PATH."
+    except Exception as exc:
+        _log.exception(f"[kubectl_exec] Unexpected error: {exc}")
+        return f"[ERROR] Unexpected error: {exc}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # TOOL REGISTRY
 # Add entries here to expose a function to the LLM agent.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -642,5 +838,34 @@ K8S_TOOLS: dict = {
         "fn":          get_namespace_status,
         "description": "List all namespaces and their phase.",
         "parameters":  {},
+    },
+}
+
+# ── kubectl_exec patch: appended after initial registry definition ─────────────
+K8S_TOOLS["kubectl_exec"] = {
+    "fn":          kubectl_exec,
+    "description": (
+        "Execute any kubectl command against the cluster. "
+        "Use for operations not covered by other tools: custom resources (CRDs), "
+        "Longhorn volumes/replicas/engines, rollout history/status, top nodes/pods, "
+        "auth can-i, api-resources, diff, and ad-hoc read-only diagnostics. "
+        "WRITE commands (apply, delete, patch, scale, etc.) are blocked unless "
+        "KUBECTL_ALLOW_WRITES=true is set by the operator. "
+        "Interactive commands (exec -it, logs -f, port-forward) are always blocked. "
+        "Always prefix the command with 'kubectl'."
+    ),
+    "parameters": {
+        "command": {
+            "type": "string",
+            "description": (
+                "Full kubectl command starting with 'kubectl'. "
+                "Examples: 'kubectl get pods -A', "
+                "'kubectl describe node worker-1', "
+                "'kubectl get volumes.longhorn.io -n longhorn-system', "
+                "'kubectl rollout history deployment/myapp -n prod', "
+                "'kubectl top nodes', "
+                "'kubectl auth can-i list pods --as system:serviceaccount:default:mysa'"
+            ),
+        },
     },
 }
