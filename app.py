@@ -459,10 +459,23 @@ You have access to live Kubernetes tools. You MUST call them to answer questions
 DO NOT list kubectl commands. DO NOT explain what you would do. DO NOT say "I would run...".
 INSTEAD: call the appropriate tool immediately, then report what it returned.
 
+NAMESPACE DISCOVERY RULE (critical):
+- NEVER assume a namespace. If you are unsure which namespace a workload is in,
+  use kubectl_exec with "kubectl get pods -A | grep -i <name>" to find it first.
+- Example: for vault, run "kubectl get pods -A | grep -i vault" before querying
+  a specific namespace — vault may be in 'vault', 'vault-system', 'hashicorp', etc.
+
+POD LISTING RULE:
+- get_pod_status with show_all=false (default) returns ONLY unhealthy pods.
+- If the user asks "how many pods", "list pods", "what pods are running", or any
+  question requiring a count or full inventory, you MUST set show_all=true.
+- If get_pod_status returns "All X pods healthy" or a small/empty list and the
+  user asked for a count, trust the count — do not re-ask or hallucinate.
+
 Available tools and when to use them:
 Pods & Nodes:
 - get_node_health            → always call for cluster health or node questions
-- get_pod_status             → always call for pod/workload health (use namespace="all")
+- get_pod_status             → call for pod/workload health; set show_all=true for counts/listings
 - get_pod_logs               → call when a specific pod name is known and logs are needed
 - describe_pod               → call for detailed diagnosis of a specific pod
 - get_events                 → always call for warning events or crashloops
@@ -494,6 +507,7 @@ RBAC:
 
 kubectl (flexible):
 - kubectl_exec               → use for ANY kubectl operation not covered above:
+                               namespace discovery ("kubectl get pods -A | grep -i <name>"),
                                CRDs, Longhorn volumes/replicas/engines, rollout history,
                                top nodes/pods, auth can-i, api-resources, diff, and
                                any ad-hoc read-only diagnostic command.
@@ -517,6 +531,8 @@ CRITICAL RULES:
    If follow-up investigation is needed, state it as a single inline observation, not a numbered list.
 9. DO NOT begin your response with "Based on the tool results" or reference tool call IDs.
    Start directly with the findings.
+10. When you have tool results, answer IMMEDIATELY and CONCISELY. Do not repeat the question.
+    Do not write the question again as part of your answer. One answer only.
 
 SITE-SPECIFIC RULES:
 {custom_rules}
@@ -527,6 +543,7 @@ RESPONSE FORMAT:
 - Skip sections with nothing to report.
 - Max ~300 words unless genuinely complex.
 - DO NOT add a "Next Steps" or "Investigation Steps" section.
+- DO NOT repeat or restate the user's question in your response.
 """
 
 RAG_INSTRUCTION = """
@@ -542,18 +559,31 @@ def _make_tool(name: str, cfg: dict):
         def _t() -> str:
             return fn()
         return _t
+
     full_desc = desc + "\nParameters: " + ", ".join(
         f"{k}:{v.get('type','str')}(default={v.get('default','required')})"
         for k, v in params.items())
+
     @tool(name, description=full_desc)
     def _t(tool_input: str) -> str:
+        # Parse kwargs from JSON or empty dict
         try:
             kwargs = json.loads(tool_input) if tool_input.strip().startswith("{") else {}
         except json.JSONDecodeError:
             kwargs = {}
+
+        # Apply defaults for any missing parameter
         for k, v in params.items():
             if k not in kwargs and "default" in v:
                 kwargs[k] = v["default"]
+
+        # Type-coerce booleans: LLM sometimes sends "true"/"false" strings
+        for k, v in params.items():
+            if k in kwargs and v.get("type") == "boolean":
+                val = kwargs[k]
+                if isinstance(val, str):
+                    kwargs[k] = val.lower() in ("true", "1", "yes")
+
         return fn(**kwargs)
     return _t
 
@@ -700,12 +730,17 @@ def build_agent():
         return "vault"  # default vault namespace name
 
     QUERY_DEFAULTS = [
-        # ── Vault: check pods + PVCs + events in vault namespace ─────────────
-        # Triggers on "vault", "hashicorp", "secret engine", "unseal"
+        # ── Vault: use kubectl_exec so namespace is not hardcoded ─────────────
+        # "is vault ok?", "vault status", "how many vault pods" etc.
+        # kubectl_exec searches all namespaces; the LLM sees real pod names + status.
         (["vault", "hashicorp", "unseal", "secret engine"],
-         [("get_pod_status",  {"namespace": "vault"}),
-          ("get_pvc_status",  {"namespace": "vault"}),
-          ("get_events",      {"namespace": "vault", "warning_only": False})]),
+         [("kubectl_exec", {"command": "kubectl get pods -A | grep -i vault"}),
+          ("kubectl_exec", {"command": "kubectl get pvc  -A | grep -i vault"}),
+          ("get_events",   {"namespace": "all", "warning_only": False})]),
+
+        # ── "how many pods / list all pods" — always show_all=true ───────────
+        (["how many pod", "list all pod", "list pod", "all pods", "count pod"],
+         [("get_pod_status", {"namespace": "all", "show_all": True})]),
 
         # ── Generic health / status ───────────────────────────────────────────
         (["health", "status", "check", "overview", "summary", "problem", "issue"],
@@ -737,7 +772,7 @@ def build_agent():
          [("get_events", {"namespace": "all", "warning_only": False})]),
         (["longhorn", "storage", "volume", "pvc", "pv", "persistent"],
          [("get_pvc_status", {"namespace": "all"}),
-          ("get_pod_status", {"namespace": "longhorn-system"}),
+          ("get_pod_status", {"namespace": "longhorn-system", "show_all": True}),
           ("get_events", {"namespace": "longhorn-system"})]),
         (["service", "svc", "endpoint", "connect", "network", "ingress", "dns"],
          [("get_service_status", {"namespace": "all"}),
@@ -931,12 +966,13 @@ def _clean_response(text: str, user_question: str = "") -> str:
     """
     Strip chat-template tokens and conversation-echo artifacts.
 
-    ChatHuggingFace sometimes echoes prior turns or repeats the user question
-    multiple times before settling on an answer.  This function:
-      1. Strips all <|im_start|>...<|im_end|> blocks
-      2. Strips bare template tokens
-      3. Detects and removes repeated-question echo loops
-      4. Keeps only the final (real) assistant answer
+    ChatHuggingFace / local models sometimes:
+      • Echo im_start/im_end template tokens
+      • Repeat the user question multiple times (echo loop)
+      • Repeat partial lines with garbage suffixes ("?assed", "?ccording")
+      • Dump an entire conversation history instead of a clean answer
+
+    This function applies layered cleanup to extract the real assistant answer.
     """
     # ── 1. Strip complete im_start/im_end blocks ──────────────────────────────
     text = re.sub(r'<\|im_start\|>\w+\s*\n?[\s\S]*?<\|im_end\|>\n?', '', text)
@@ -949,18 +985,32 @@ def _clean_response(text: str, user_question: str = "") -> str:
         text = text.replace(tok, '')
 
     # ── 2. Strip conversation-echo: repeated user question lines ─────────────
-    # Pattern: the model echoes "Are there any X?\nAre there any X?\n..." 10x
     if user_question:
         q_stripped = user_question.strip()
-        # Remove all occurrences of the question (exact or with trailing punct)
-        escaped = re.escape(q_stripped)
-        text = re.sub(r'(?i)(\s*' + escaped + r'[?!.]?\s*){{2,}}', '', text)
-        # Also remove a single leading echo of the question
+        escaped    = re.escape(q_stripped)
+        # Remove ALL occurrences of the question (exact + trailing punct)
+        text = re.sub(r'(?i)(\s*' + escaped + r'[?!.]?\s*){2,}', ' ', text)
+        # Remove a single leading echo
         text = re.sub(r'(?i)^\s*' + escaped + r'[?!.]?\s*\n', '', text)
 
-    # ── 3. Detect line-level repetition loops (any repeated line 3+ times) ───
-    lines = text.split('\n')
-    seen: dict = {}
+    # ── 3. Detect and remove partial-echo lines ───────────────────────────────
+    # Pattern: "how many pods in vault-system namespace?assed"
+    # The question fragment appears inside a line followed by garbage text.
+    if user_question:
+        # Build a short prefix (first 20 chars) to catch truncated echoes
+        q_prefix = re.escape(user_question.strip()[:20])
+        lines_in  = text.split('\n')
+        lines_out = []
+        for line in lines_in:
+            # Drop lines that start with the question fragment but are garbled
+            if re.match(r'(?i)\s*' + q_prefix, line) and '?' in line and len(line) > len(user_question) + 5:
+                continue
+            lines_out.append(line)
+        text = '\n'.join(lines_out)
+
+    # ── 4. Line-level deduplication (repeated lines 3+ times are truncated) ───
+    lines  = text.split('\n')
+    seen:  dict = {}
     deduped = []
     for line in lines:
         key = line.strip().lower()
@@ -968,18 +1018,20 @@ def _clean_response(text: str, user_question: str = "") -> str:
             deduped.append(line)
             continue
         seen[key] = seen.get(key, 0) + 1
-        if seen[key] <= 2:   # allow up to 2 occurrences (e.g. section headers)
+        if seen[key] <= 2:
             deduped.append(line)
+        # Lines seen 3+ times are silently dropped
     text = '\n'.join(deduped)
 
-    # ── 4. If response still looks like a raw conversation dump, take the last
-    #       substantive paragraph after the final "assistant" role marker ──────
-    if text.count('\n') > 40:  # suspiciously long
-        # Try to find a clean final assistant block
+    # ── 5. If response looks like a raw conversation dump, extract final answer
+    if text.count('\n') > 40:
         for marker in ['assistant\n', 'ASSISTANT:\n', 'Assistant:\n']:
             if marker in text:
                 text = text.split(marker)[-1].strip()
                 break
+
+    # ── 6. Collapse excessive blank lines ────────────────────────────────────
+    text = re.sub(r'\n{3,}', '\n\n', text)
 
     return text.strip()
 

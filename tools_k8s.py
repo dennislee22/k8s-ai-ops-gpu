@@ -68,33 +68,59 @@ _autoscaling = _k8s.AutoscalingV2Api()
 
 # ── Pods ──────────────────────────────────────────────────────────────────────
 
-def get_pod_status(namespace: str = "all") -> str:
-    """List all non-healthy pods.  Skips Running+ready+0-restarts and Completed."""
+def get_pod_status(namespace: str = "all", show_all: bool = False) -> str:
+    """
+    List pods in a namespace.
+
+    By default (show_all=False) only non-healthy pods are returned — pods that
+    are Running, fully ready, and have 0 restarts are omitted to keep output
+    concise for health-check queries.
+
+    Set show_all=True (or ask "how many pods", "list all pods", "list pods in
+    <namespace>") to return EVERY pod including healthy ones.  Always use
+    show_all=True when the user asks for a count or a complete pod listing.
+    """
     try:
         pods = (_core.list_pod_for_all_namespaces() if namespace == "all"
                 else _core.list_namespaced_pod(namespace=namespace))
         if not pods.items:
-            return f"No pods found in '{namespace}'."
-        lines = [f"Pods in '{namespace}':"]
-        skipped = 0
+            return f"No pods found in namespace '{namespace}'."
+
+        lines   = [f"Pods in '{namespace}' (total: {len(pods.items)}):"]
+        healthy = []
+        unhealthy = []
+
         for pod in pods.items:
             phase    = pod.status.phase or "Unknown"
             restarts = sum(cs.restart_count for cs in (pod.status.container_statuses or []))
             ready    = sum(1 for cs in (pod.status.container_statuses or []) if cs.ready)
             total    = len(pod.spec.containers)
-            if phase in ("Succeeded", "Completed"):
-                skipped += 1; continue
-            if phase == "Running" and ready == total and restarts == 0:
-                skipped += 1; continue
-            bad = [f"{c.type}={c.status}"
-                   for c in (pod.status.conditions or []) if c.status != "True"]
-            lines.append(
+            bad      = [f"{c.type}={c.status}"
+                        for c in (pod.status.conditions or []) if c.status != "True"]
+            row = (
                 f"  {pod.metadata.namespace}/{pod.metadata.name}: {phase} "
                 f"| Ready {ready}/{total} | Restarts:{restarts}"
-                + (f" [{', '.join(bad)}]" if bad else ""))
-        if skipped:
-            lines.append(f"  ({skipped} healthy/completed pods omitted)")
-        return "\n".join(lines) if len(lines) > 1 else f"All pods healthy in '{namespace}'."
+                + (f" [{', '.join(bad)}]" if bad else "")
+            )
+            is_ok = (phase in ("Running", "Succeeded", "Completed")
+                     and ready == total and restarts == 0)
+            if is_ok:
+                healthy.append(row)
+            else:
+                unhealthy.append(row)
+
+        if show_all:
+            lines += unhealthy + healthy
+        else:
+            lines += unhealthy
+            if healthy:
+                lines.append(f"  ({len(healthy)} healthy pod(s) omitted — use show_all=true to list them)")
+
+        if len(lines) == 1:
+            # Only the header — everything was healthy
+            return (f"All {len(pods.items)} pod(s) healthy in namespace '{namespace}'.\n"
+                    + "\n".join(healthy))
+        return "\n".join(lines)
     except ApiException as e:
         return f"K8s API error: {e.reason}"
 
@@ -715,8 +741,18 @@ K8S_TOOLS: dict = {
     # ── Pods ──────────────────────────────────────────────────────────────────
     "get_pod_status": {
         "fn":          get_pod_status,
-        "description": "List non-healthy pods. Use namespace='all' to scan entire cluster.",
-        "parameters":  {"namespace": {"type": "string", "default": "all"}},
+        "description": (
+            "List pods in a namespace. "
+            "By default only UNHEALTHY pods are returned (non-Running, not ready, or high restarts). "
+            "Set show_all=true to list ALL pods including healthy ones — ALWAYS use show_all=true "
+            "when the user asks 'how many pods', 'list pods', 'what pods are running', or "
+            "any question that requires a complete pod count or inventory."
+        ),
+        "parameters":  {
+            "namespace": {"type": "string",  "default": "all"},
+            "show_all":  {"type": "boolean", "default": False,
+                          "description": "Set true to include healthy/running pods in the output"},
+        },
     },
     "get_pod_logs": {
         "fn":          get_pod_logs,
